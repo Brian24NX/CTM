@@ -1,0 +1,6 @@
+# Test-only CPU runtime. Do not install into the Dreamer TensorFlow environment.
+# This pins our comparison runtime, not a proven original-paper environment.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.7.0+cpu
+numpy==2.5.3
+huggingface_hub==1.31.0

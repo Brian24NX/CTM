@@ -1,2 +1,7 @@
 # Shell launchers must remain executable by Bash after a Windows checkout.
 *.sh text eol=lf
+
+# Preserve the exact upstream bytes checked by CTM reference fixtures.
+third_party/ctm_reference/models/*.py text eol=lf
+third_party/ctm_reference/LICENSE text eol=lf
+tests/fixtures/ctm_reference/*.npz binary
