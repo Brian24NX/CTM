@@ -26,7 +26,6 @@ import tensorflow as tf  # noqa: E402
 from tensorflow.keras import layers as tfkl  # noqa: E402
 from tensorflow_probability import distributions as tfd  # noqa: E402
 
-import models  # noqa: E402
 import nrsm_online_agent  # noqa: E402
 import tools  # noqa: E402
 import validate_nrsm  # noqa: E402
@@ -56,6 +55,24 @@ class LearnedStdHead(tools.Module):
         return tfd.Independent(tfd.Normal(mean, self._min_std + tf.nn.softplus(raw_std)), 0)
 
 
+class MotionHead(tools.Module):
+    """models.DenseHead equivalent (ELU layers, linear output, unit-variance Gaussian) whose weights use
+    fixed-seed initialisers. Building it draws nothing from the shared random stream, so every other
+    initial weight (world model, actor, critic) stays identical to the paired run's."""
+
+    def __init__(self, size, layers=2, units=400, act=tf.nn.elu, seed=20260928):
+        super().__init__()
+        self._size, self._layers, self._units, self._act, self._seed = size, layers, units, act, seed
+
+    def __call__(self, features):
+        glorot = lambda offset: tf.keras.initializers.GlorotUniform(seed=self._seed + offset)
+        x = features
+        for index in range(self._layers):
+            x = self.get(f'h{index}', tfkl.Dense, self._units, self._act, kernel_initializer=glorot(index))(x)
+        x = self.get('out', tfkl.Dense, self._size, kernel_initializer=glorot(99))(x)
+        return tfd.Independent(tfd.Normal(x, 1), 1)
+
+
 def delta_targets(vector):
     """Normalised one-step changes [B, T-1, 5] of the motion coordinates."""
     dims = list(DELTA_DIMS)
@@ -81,8 +98,8 @@ def world_model_class(learned_reward_std=None, delta_weight=None):
                 self.reward = LearnedStdHead(layers=2, units=config.hidden, min_std=learned_reward_std)
             if delta_weight:
                 self.delta_weight = float(delta_weight)
-                self.delta = models.DenseHead((len(DELTA_DIMS),), layers=2, units=config.hidden)
-                # Create its variables now, before OnlineAgent builds the optimizer.
+                self.delta = MotionHead(len(DELTA_DIMS), layers=2, units=config.hidden)
+                # Create its variables now, before OnlineAgent builds the optimizer (seeded: no RNG shift).
                 self.delta(tf.zeros([1, config.stoch * config.classes + config.context]))
 
         def delta_nll(self, feat, data):

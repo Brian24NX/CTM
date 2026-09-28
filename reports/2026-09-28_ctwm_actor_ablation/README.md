@@ -191,6 +191,13 @@ it. The absolute-vector loss (unit-variance Gaussian on the normalised vector) b
   rewards depend on.
 - The change is applied on top of the actor fix and compared seed-for-seed with the actor-fix runs (seeds 17 and
   18, 137,680 steps).
+- **Relaunch note (15:15).** A first launch at 15:07 was stopped after ~2,080 steps, before any analysis, and its
+  outputs were deleted; nothing from it was used.
+  - Cause: the new head drew its initial weights from TensorFlow's shared random stream, which shifted every other
+    initial weight. Seed 17's step-0 evaluation was 0 / 0 / 100 / 0% instead of the paired runs' 0 / 5 / 70 / 30%.
+  - Fix: the head (`MotionHead`) now uses fixed-seed initialisers. All other initial weights (world model, actor,
+    critic) are then bit-identical to the actor-fix configuration (verified), and seed 17's step-0 evaluation
+    matches exactly.
 
 **Criteria**, compared with the actor-fix run of the same seed:
 
