@@ -191,8 +191,11 @@ it. The absolute-vector loss (unit-variance Gaussian on the normalised vector) b
   rewards depend on.
 - The change is applied on top of the actor fix and compared seed-for-seed with the actor-fix runs (seeds 17 and
   18, 137,680 steps).
-- **Relaunch note (15:15).** A first launch at 15:07 was stopped after ~2,080 steps, before any analysis, and its
-  outputs were deleted; nothing from it was used.
+- **Relaunch note.** Times are from git and file timestamps.
+  - This protocol was committed at 15:06:07 (`228d35d`).
+  - A first launch (~15:06) was stopped at ~15:07 after ~2,080 steps, before any analysis. Its outputs were deleted,
+    and nothing from it was used.
+  - The fix was committed at 15:08:37 (`ff40afa`), and the runs were relaunched at 15:08.
   - Cause: the new head drew its initial weights from TensorFlow's shared random stream, which shifted every other
     initial weight. Seed 17's step-0 evaluation was 0 / 0 / 100 / 0% instead of the paired runs' 0 / 5 / 70 / 30%.
   - Fix: the head (`MotionHead`) now uses fixed-seed initialisers. All other initial weights (world model, actor,
@@ -213,51 +216,110 @@ it. The absolute-vector loss (unit-variance Gaussian on the normalised vector) b
   - The median world-model gradient norm after 1,000 updates is ≤ 70 (about 3× the baseline's 23). Experiment 2
     failed through clipping domination, and this guardrail catches that.
 
+## Results: experiment 3, actor fix + one-step motion head
+
+Both runs completed exactly 137,680 steps (27,330 / 27,336 actor-critic updates, ~71 min each), and checkpoint
+restore was verified.
+
+**Verdict against the pre-registered criteria:**
+
+| Criterion | Seed 17 | Seed 18 | Verdict |
+|---|---:|---:|---|
+| **A (primary):** motion-head 1-step position-change error, held-out median ≤ 11 m | **2.6 m** | **2.3 m** | ✅ Pass |
+| **B:** own-flight reward correlation ≥ 0.3 **and** RMSE / std ≤ 3 | +0.32, 12.5× | +0.17, 19.0× | ❌ Fail |
+| **Behaviour:** Q4 final distance < 820 m or pickups ≥ 10%, and better than the actor fix | 1,077 m, 1.7% | 1,043 m, 1.9% | ❌ Fail |
+| **Guardrail:** 15-step open-loop RMSE ≤ 1.1× the actor fix (0.441 / 0.403) | 0.435 | 0.409 | ✅ Pass |
+| **Guardrail:** median world-model gradient norm after 1,000 updates ≤ 70 | 25.5 | 30.5 | ✅ Pass |
+
+**The motion head does its job.** One-step position-change error in metres (`delta_check.py`, same steps for every
+method):
+
+| Run | Held-out: absolute decoder | Held-out: motion head | Own flights: absolute decoder | Own flights: motion head |
+|---|---:|---:|---:|---:|
+| Actor fix, seed 17 / 18 | 218 / 208 m | n/a | 190 / 163 m | n/a |
+| + motion head, seed 17 / 18 | 229 / 222 m | **2.6 / 2.3 m** | 203 / 190 m | **1.2 / 1.2 m** |
+| Constant velocity (repeat the last step's movement) | 1.7 m | 1.7 m | 1.5–1.9 m | 1.5–1.9 m |
+| Median actual step | 22 m | 22 m | 4–5 m | 4–5 m |
+
+- The latent state now encodes metre-scale motion.
+- On the agent's own flights the motion head beats the constant-velocity guess, so it captures what each action
+  changes. On the faster held-out flights it is within 1 m of that guess.
+- The absolute decoder is unchanged (~200 m). The pre-registered 11 m bar turned out to be loose next to the 1.7 m
+  constant-velocity guess; that guess was measured after launch, and the bar was not changed.
+- The motion-head loss fell from 7.0 / 9.4 to 4.8 / 4.7. The world model's other predictions were not harmed (both
+  guardrails pass).
+
+**But the reward signal improves only modestly, and the actor still does not learn.**
+
+- Own-flight reward correlation rose from +0.25 / +0.06 (actor fix) to +0.32 / +0.17. The RMSE is still 12–19× the
+  real reward variation.
+- Deterministic evaluation: 0% delivery at all 16 fixed-scene checkpoints of both seeds; pickups ≤ 10%.
+- In the last quarter, the policy flies slightly faster (7.4 / 7.5 against 7.1 / 6.8 m/step) and leaves the map more
+  often (42% against 33% / 39%), but does not approach the goals.
+- Final evaluations show the same shift: fewer timeouts, more out-of-bounds endings (38–54%).
+
+**Interpretation.** The information needed for per-step rewards is now in the latent state, but the reward head
+does not use it.
+
+- A plausible reason is the one diagnosed in experiment 2: the reward head is a unit-variance Gaussian, and rewards
+  that vary by ~0.0015 give it almost no gradient.
+- The agent's own flights move only ~4–5 m per step, so their shaping rewards are even smaller than on held-out
+  flights.
+- The natural next step applies the recipe that worked here to the reward. For example, add an auxiliary head for
+  the per-step reward with a fixed-scale normalised target, which avoids experiment 2's learned-variance clipping
+  failure. Or compute the imagined shaping from the motion head's predicted displacement, projected onto the goal
+  direction.
+
 ## Figures
 
 One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned
-reward std. Seed 18 has no baseline run.
+reward std, yellow = actor fix + motion head. Seed 18 has no baseline run.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="final_distance_to_goal_dark.png">
-  <img alt="Two-panel line chart (seeds 17 and 18) of the rolling mean distance to the active goal at the end of training episodes. All five runs stay between about 950 and 1,200 m for the whole 137,680 steps; none trends down toward the 820 m threshold." src="final_distance_to_goal_light.png">
+  <img alt="Two-panel line chart (seeds 17 and 18) of the rolling mean distance to the active goal at the end of training episodes, for four conditions. All seven runs stay between about 880 and 1,210 m for the whole 137,680 steps; none trends down toward the 820 m threshold." src="final_distance_to_goal_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="training_pickup_rate_dark.png">
-  <img alt="Two-panel line chart of the rolling pickup rate in training episodes. Every condition fluctuates between 0% and 7% with no upward trend; the pre-registered threshold was 10%." src="training_pickup_rate_light.png">
+  <img alt="Two-panel line chart of the rolling pickup rate in training episodes for four conditions. Every condition fluctuates between 0% and about 7% with no upward trend; the pre-registered threshold was 10%." src="training_pickup_rate_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="world_model_15step_dark.png">
-  <img alt="Two-panel log-scale line chart of the world model's 15-step open-loop error divided by the persistence error over world-model updates. The baseline and actor-fix runs fall from about x2.2 to about x1.0; the learned-reward-std runs plateau around x1.3 to x1.5." src="world_model_15step_light.png">
+  <img alt="Two-panel log-scale line chart of the world model's 15-step open-loop error divided by the persistence error over world-model updates. The baseline, actor-fix and motion-head runs fall from about x2.2 to about x1.0; the learned-reward-std runs plateau around x1.3 to x1.5." src="world_model_15step_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="actor_gradient_norm_dark.png">
-  <img alt="Two-panel log-scale line chart of the actor gradient norm over actor-critic updates. The baseline's median is about 0.012; the actor-fix runs sit about 3 times higher (median about 0.035) and the reward-fix runs about 1.6 times higher (median about 0.02)." src="actor_gradient_norm_light.png">
+  <img alt="Two-panel log-scale line chart of the actor gradient norm over actor-critic updates. The baseline's median is about 0.012; the actor-fix and motion-head runs sit about 3 times higher (medians 0.034 to 0.039) and the reward-fix runs about 1.6 times higher (median about 0.02)." src="actor_gradient_norm_light.png">
 </picture>
 
 ## Overall conclusions
 
-1. **Neither fix makes the CT-WM actor learn within 137,680 steps.** All five runs (baseline, 2 × actor fix,
-   2 × actor fix + reward fix) end at 0% delivery, with behaviour indistinguishable from random.
+1. **No change so far makes the CT-WM actor learn within 137,680 steps.** All seven runs (baseline, 2 × actor fix,
+   2 × + reward std, 2 × + motion head) end at 0% delivery, with behaviour close to random.
 2. **The imagination-scale hypothesis is rejected as the sole cause.** Up-weighting the RL term increases actor
    gradients ~3× but amplifies an uninformative signal (with slightly more out-of-bounds endings).
 3. **The learned reward-std head, in this form, is rejected and harmful.** It does not improve reward prediction,
    and it degrades the world model through gradient clipping. If it is retried, the reward term needs its own
    weighting or a separate clip, or a larger `min_std`.
-4. **The bottleneck is the world model's precision at single-step scale.** Its position error (~200 m) is about 10×
-   one step of motion. Until it can resolve single steps, imagined per-step rewards cannot guide the actor.
+4. **Single-step precision was a real bottleneck, and it is fixable.**
+   - A normalised one-step motion head brings the latent's motion error from ~200 m to ~1–3 m, better than a
+     constant-velocity guess on the agent's own flights, without harming the rest of the world model.
+5. **The remaining bottleneck is the reward head.**
+   - Even with metre-scale motion in the latent, own-flight reward correlation only reaches +0.17 to +0.32, and the
+     error is 12–19× the real variation.
+   - Rewards that vary by ~0.0015 give a unit-variance Gaussian head almost no gradient.
 
-**Suggested next experiments** (not run; one variable each):
+**Suggested next experiments** (not run; one variable each, on top of actor fix + motion head):
 
-- Predict state changes (Δ-vectors, i.e. residual decoding) instead of absolute states, or up-weight the position
-  and goal-offset dimensions. Measure the position error in metres against the 22 m/step scale.
-- Give the actor the exact observation in the real environment, as the team's DreamerV2 does. Then imagination only
-  has to rank actions, not localise the drone.
-- Derive shaping in imagination from a predicted potential Φ(s) (remaining route length), rather than predicting each
-  per-step reward difference.
+- **A normalised per-step reward head.** This is the motion-head recipe applied to the reward: a fixed-scale
+  normalised target for non-terminal rewards (~0.0015 std in prefill) and a unit-variance NLL. Imagined rewards
+  would use its denormalised mean. Unlike experiment 2, no learned variance is involved, so no clipping domination.
+- **Analytic shaping in imagination.** Compute γΦ(s′) − Φ(s) from the motion head's predicted displacement,
+  projected onto the goal direction, instead of learning it.
+- Give the actor the exact observation in the real environment, as the team's DreamerV2 does.
 - Any positive result needs ≥ 3 seeds per condition. Seed 18 in these experiments has no baseline control.
 
 ## Files in this folder
@@ -266,10 +328,13 @@ reward std. Seed 18 has no baseline run.
 |---|---|
 | `run_ablation.py`, `ablation_patches.py` | Wrapper and runtime patches (the team's code is not modified) |
 | `*_ablation.json` | Per-run record of the changes and the wrapper/patch SHA-256 |
-| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, `result.json`, `manifest.json` |
-| `baseline_reward_signal.json` | Reward check on the first report's final checkpoint |
-| `sweep_world_model.py`, `reward_signal_check.py`, `make_figures.py` | Analysis scripts (reproduce the files and figures) |
+| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*`, `imagscale1_delta_seed{17,18}_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, motion check, `result.json`, `manifest.json` |
+| `baseline_reward_signal.json`, `baseline_delta_check.json` | Reward and motion checks on the first report's final checkpoint |
+| `sweep_world_model.py`, `reward_signal_check.py`, `delta_check.py`, `make_figures.py` | Analysis scripts (reproduce the files and figures) |
 | `*_light.png`, `*_dark.png` | Comparison figures |
 
-The git history shows each script's revision: `82ec9cd` is the wrapper the actor-fix runs used, and `4f09dfd` is
-the one the reward-fix runs used.
+The git history records which script revision each set of runs used:
+
+- actor-fix runs: wrapper `82ec9cd`;
+- reward-fix runs: wrapper and patches `4f09dfd`;
+- motion-head runs: wrapper `228d35d`, patches `ff40afa`.

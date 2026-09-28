@@ -202,9 +202,11 @@ Files: `ctwm_online_1h_{result,manifest}.json`, `ctwm_online_1h_evaluations.json
    It is still worth checking whether they harm the early representation.
 5. The world model reaches parity with the persistence baseline at 5–15 steps within an hour. **It still has to beat
    it clearly** before imagination can be trusted for planning.
-   - **Follow-up, same day:** both the actor-objective fix and a reward-head fix were tested, and both failed their
-     pre-registered criteria. The root cause is the world model's ~200 m position error against ~22 m of motion per
-     step. See [`../2026-09-28_ctwm_actor_ablation/`](../2026-09-28_ctwm_actor_ablation/README.md).
+   - **Follow-up, same day:** three changes were tested with pre-registered criteria
+     ([`../2026-09-28_ctwm_actor_ablation/`](../2026-09-28_ctwm_actor_ablation/README.md)):
+     - an actor-objective fix and a reward-head fix, which both failed;
+     - a one-step motion head, which cut the world model's step-to-step position error from ~200 m to ~1–3 m.
+     - The actor still did not learn: the reward head does not yet use the new information.
 6. Housekeeping for the team: the stale `models.py` hash guard in `prepare_kl_validation.py`; the Linux-only
    `pause_after_seed1` test; the ARM tolerance of the `unet_depth2` parity fixture; and the iCloud venv trap on macOS
    (HANDBOOK §9).
