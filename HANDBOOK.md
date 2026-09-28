@@ -68,14 +68,17 @@ Recurrent Space Model)**. The full agent is **CT-WM (Continuous-Thought World Mo
   - CT-WM runs end to end and its CTM core is numerically faithful to the official code.
   - In a 1-hour run (137k steps), its **world model learned** to roughly match a "nothing changes" guess at 5–15
     steps ahead. Its **actor did not learn at all**: it stayed a random policy with 0% deliveries.
-  - Three follow-up experiments did not change that (0% delivery in all of them):
+  - Four follow-up experiments did not change that (0% delivery in all of them):
     - a stronger actor signal;
     - a learned-variance reward head;
-    - a one-step motion head.
-  - The motion head fixed one real problem. The world model's step-to-step position error fell from ~200 m to
-    ~1–3 m (the drone moves ~5–22 m per step).
-  - The remaining bottleneck is the reward head. It still cannot turn that information into usable per-step reward
-    predictions.
+    - a one-step motion head;
+    - a normalised reward target.
+  - Two real problems were fixed along the way:
+    - The motion head cut the world model's step-to-step position error from ~200 m to ~1–3 m.
+    - The normalised reward target made ordinary-step reward predictions accurate (correlation ~0.76).
+  - The actor then did learn from imagination, but it exploited a biased prediction. The new reward head predicts
+    almost no penalty for ending an episode, so the drone learned to fly off the map (94%).
+  - Next: a reward distribution that keeps rare penalties (DreamerV3's two-hot bins).
   - Early training shows enormous gradients (up to ~1e9). They settle after ~600 updates.
 - No comparison so far is a fair, matched benchmark. The open problems are listed in [§9](#9-known-issues-and-open-questions).
 
@@ -776,8 +779,8 @@ Details, commands and the small result files are in [`reports/2026-09-28_first_r
 | **CT-WM online, 1 hour, seed 17** (the team's 1-hour protocol, defaults unchanged) | **137,680 env steps and 27,380 updates** (the team's GPU managed 8,400 steps in 1 h, so ~16× faster). **0% delivery** on fixed and fresh scenes. The actor stayed statistically random for all 1,540 policy episodes |
 | CT-WM world model at all 13 checkpoints (the 8 held-out episodes of the offline check) | 1-step open-loop RMSE 1.05 → 0.24 (persistence 0.11); 15-step 1.03 → 0.44 (persistence 0.45). **Matches "nothing changes" at 15 steps and is still improving** |
 | World-model gradient norm (online run) | ~8e5 at the start, below the clip (100) from update ~630, then a median of 23. **The explosion is an early transient** |
-| **Ablations** (6 runs, each 137,680 steps; [`reports/2026-09-28_ctwm_actor_ablation/`](reports/2026-09-28_ctwm_actor_ablation/README.md)) | `imagination_scale` 1.0 (seeds 17, 18): actor gradients ~3× larger, behaviour still random. + learned-variance reward head: not better, and it hurt the world model (clipping domination). + one-step motion head: **motion error 2.3–2.6 m held-out and 1.2 m on its own flights (it was ~200 m)**, guardrails pass, but reward correlation only +0.17 to +0.32 and behaviour unchanged. **0% delivery in every run** |
-| Why the reward signal is uninformative | Without the motion head, the 1-step position error is ~210–230 m against ~5–22 m of movement per step (the team's DreamerV2: 273–294 m). With it, motion is resolved, but the unit-variance reward head still barely learns rewards that vary by ~0.0015 |
+| **Ablations** (8 runs, each 137,680 steps; [`reports/2026-09-28_ctwm_actor_ablation/`](reports/2026-09-28_ctwm_actor_ablation/README.md)) | `imagination_scale` 1.0: actor gradients ~3× larger, behaviour still random. + learned-variance reward head: hurt the world model. + one-step motion head: **motion error 1–3 m (was ~200 m)**, reward correlation only +0.17 to +0.32. + normalised reward target: **reward correlation +0.75 to +0.78**, and the actor responds (speed ×1.7), but it flies off the map in 94% of episodes. **0% delivery in every run** |
+| Why the actor exploits the model | The normalised (symlog-Gaussian) reward head predicts −0.02 for episode-ending steps whose actual reward is −0.68. Averaging in symlog space erases the rare penalty, so leaving the map looks nearly free in imagination |
 
 ---
 
@@ -823,7 +826,7 @@ The list is prioritised. "Confirmed" means shown by code or a minimal reproducti
       still 2.3× worse at 1 step. It is still improving.
     - The posterior/prior feature gap should be tracked (`diagnose_nrsm_context.py`).
 11. **The CT-WM actor does not learn**, as shown by the 2026-09-28 1-hour run. Over 1,540 policy episodes its action
-    statistics never left those of the random prefill. Three changes were tested with pre-registered criteria
+    statistics never left those of the random prefill. Four changes were tested with pre-registered criteria
     ([report](reports/2026-09-28_ctwm_actor_ablation/README.md)):
     - `imagination_scale` 0.1 → 1.0: actor gradients grew ~3×, but behaviour stayed random, with slightly more
       out-of-bounds endings. **Rejected as the sole cause.**
@@ -836,10 +839,16 @@ The list is prioritised. "Confirmed" means shown by code or a minimal reproducti
     - A normalised one-step motion head on top fixes that part. Motion error falls to 1–3 m, better than a
       constant-velocity guess on its own flights, with the guardrails passing. But reward correlation only reaches
       +0.17 to +0.32, and behaviour is unchanged. **Mechanism passed; behaviour criterion failed.**
+    - A normalised (symlog) reward target on top: ordinary-step reward correlation reaches +0.75 to +0.78 (RMSE ≈
+      std), and the actor finally responds to imagination.
+      - But the head predicts ~−0.02 for episode-ending steps whose actual reward is −0.68, so the actor learns to
+        fly off the map (94%).
+      - **Mechanism passed; behaviour failed through model exploitation.**
     - Next, on top of actor fix + motion head:
-      - a normalised per-step reward head (the same fixed-scale recipe, no learned variance);
-      - or compute imagined shaping from the motion head's displacement, projected onto the goal direction;
-      - or give the actor the exact observation, as DreamerV2 does.
+      - a two-hot symlog reward head (DreamerV3), whose expected reward in original units keeps rare terminal
+        penalties;
+      - or a split reward: a normalised non-terminal head plus a raw terminal head, weighted by the predicted
+        termination probability.
       - Any claim needs ≥ 3 seeds.
 12. **No matched comparison yet:** CT-WM differs from our DreamerV2 in actor input (latent vs. exact), use of
     demonstrations (none vs. 64), batch size (2 × 101 vs. 50 × 20) and model size. A fair comparison must match these

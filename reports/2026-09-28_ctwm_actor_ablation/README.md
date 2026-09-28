@@ -303,35 +303,94 @@ vary by only ~0.0014, so they give it almost no gradient.
   - The motion head's held-out 1-step error stays ≤ 11 m.
   - The median world-model gradient norm after 1,000 updates is ≤ 70.
 
+## Results: experiment 4, actor fix + motion head + normalised reward head
+
+Both runs completed exactly 137,680 steps (~75 min each), and checkpoint restore was verified. Their step-0
+evaluations reproduced experiment 3 exactly.
+
+**Verdict against the pre-registered criteria:**
+
+| Criterion | Seed 17 | Seed 18 | Verdict |
+|---|---:|---:|---|
+| **Mechanism (primary):** own-flight reward correlation ≥ 0.3 and RMSE / std ≤ 3 (exp 3: +0.32 / +0.17, 12.5× / 19.0×) | **+0.75, 1.0×** | **+0.78, 0.8×** | ✅ Pass |
+| **Behaviour:** Q4 final distance < 820 m or pickups ≥ 10%, and better than exp 3 | 1,156 m, 2.9% | 1,161 m, 5.6% | ❌ Fail |
+| **Guardrail:** 15-step open-loop RMSE ≤ 1.1× exp 3 (0.435 / 0.409) | 0.382 | 0.441 (+8%) | ✅ Pass |
+| **Guardrail:** motion head ≤ 11 m; median world-model gradient ≤ 70 | 2.7 m, 25.3 | 2.2 m, 30.8 | ✅ Pass |
+
+**The reward head now predicts ordinary steps well. For the first time, the actor clearly responds to what it
+imagines, but in the wrong direction.**
+
+| Last quarter of policy episodes | Exp 3, seed 17 | Exp 4, seed 17 | Exp 3, seed 18 | Exp 4, seed 18 |
+|---|---:|---:|---:|---:|
+| Mean speed | 7.4 m/step | **12.3 m/step** | 7.5 m/step | **12.6 m/step** |
+| Out of bounds | 42% | **94%** | 42% | **94%** |
+| Mean episode length | 81 | **52** | 79 | **48** |
+| Final distance to active goal | 1,077 m | 1,156 m | 1,043 m | 1,161 m |
+| Pickups | 1.7% | 2.9% | 1.9% | 5.6% |
+
+Deterministic evaluation also shows 0% delivery, but 90–100% out-of-bounds endings after ~34–43 steps.
+
+**Why (`terminal_reward_check.py`, the agent's own last 100 episodes, one-step prior predictions):**
+
+| Reward on… | Actual | Exp 3 prediction (raw target) | Exp 4 prediction (symlog target) |
+|---|---:|---:|---:|
+| Episode-ending steps (mostly out of bounds) | −0.68 | −0.41 / −0.29 | **−0.022 / −0.014** |
+| The step just before | −0.009 | −0.023 / −0.030 | −0.011 / −0.011 |
+| All other steps | −0.007 | −0.009 / −0.023 | −0.007 / −0.008 |
+
+- The normalised head gets ordinary steps right, but predicts **almost no penalty for ending the episode**.
+- The cause is that a single Gaussian in symlog space averages the rare terminal outcome (target ≈ −6.2) with
+  ordinary ones (≈ 0). Mapped back with symexp, which is exponential, the in-between value becomes a tiny penalty.
+  The raw-scale head of experiment 3 also under-predicted the penalty, but it averaged in linear space, which keeps
+  the expected value.
+- So in imagination, flying off the map looks nearly free, while continuing costs about −0.007 per step plus a
+  poor future. The actor learned to leave quickly.
+- This is model exploitation of a biased reward prediction. It is also the first evidence in these runs that the
+  CT-WM actor-critic *does* learn from imagined rewards once they carry a signal.
+
+**Next step (not run).** Keep the normalised treatment of ordinary steps, but represent the reward as a
+distribution whose mean is taken in the original units.
+
+- DreamerV3's *two-hot* symlog bins do this: the expected reward is Σ p_i · symexp(bin_i), so rare large penalties
+  keep their full weight.
+- An alternative is to split the reward: the normalised head on non-terminal steps, a separate raw-scale head for
+  terminal steps, weighted by the predicted termination probability.
+
 ## Figures
 
 One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned
-reward std, yellow = actor fix + motion head. Seed 18 has no baseline run.
+reward std, yellow = actor fix + motion head, pink = actor fix + motion head + normalised reward. Seed 18 has no
+baseline run.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="final_distance_to_goal_dark.png">
-  <img alt="Two-panel line chart (seeds 17 and 18) of the rolling mean distance to the active goal at the end of training episodes, for four conditions. All seven runs stay between about 880 and 1,210 m for the whole 137,680 steps; none trends down toward the 820 m threshold." src="final_distance_to_goal_light.png">
+  <img alt="Two-panel line chart (seeds 17 and 18) of the rolling mean distance to the active goal at the end of training episodes, for five conditions. Eight runs stay between about 860 and 1,210 m; the normalised-reward runs drift higher, up to about 1,270 to 1,410 m. None trends down toward the 820 m threshold." src="final_distance_to_goal_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="training_pickup_rate_dark.png">
-  <img alt="Two-panel line chart of the rolling pickup rate in training episodes for four conditions. Every condition fluctuates between 0% and about 7% with no upward trend; the pre-registered threshold was 10%." src="training_pickup_rate_light.png">
+  <img alt="Two-panel line chart of the rolling pickup rate in training episodes for five conditions. Every condition fluctuates between 0% and at most 9% with no sustained upward trend; the pre-registered threshold was 10%." src="training_pickup_rate_light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="training_oob_rate_dark.png">
+  <img alt="Two-panel line chart of the rolling out-of-bounds rate in training episodes for five conditions. Most runs stay between about 15% and 70%; the normalised-reward runs climb to about 95 to 100% after roughly 40,000 (seed 17) and 50,000 (seed 18) environment steps." src="training_oob_rate_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="world_model_15step_dark.png">
-  <img alt="Two-panel log-scale line chart of the world model's 15-step open-loop error divided by the persistence error over world-model updates. The baseline, actor-fix and motion-head runs fall from about x2.2 to about x1.0; the learned-reward-std runs plateau around x1.3 to x1.5." src="world_model_15step_light.png">
+  <img alt="Two-panel log-scale line chart of the world model's 15-step open-loop error divided by the persistence error. Baseline, actor-fix, motion-head and normalised-reward runs fall from about x2.2 to about x0.85 to x1.0; the learned-reward-std runs plateau around x1.25 to x1.5." src="world_model_15step_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="actor_gradient_norm_dark.png">
-  <img alt="Two-panel log-scale line chart of the actor gradient norm over actor-critic updates. The baseline's median is about 0.012; the actor-fix and motion-head runs sit about 3 times higher (medians 0.034 to 0.039) and the reward-fix runs about 1.6 times higher (median about 0.02)." src="actor_gradient_norm_light.png">
+  <img alt="Two-panel log-scale line chart of the actor gradient norm over actor-critic updates. The baseline's median is about 0.012; the actor-fix and motion-head runs sit about 3 times higher (medians 0.034 to 0.039); the reward-std and normalised-reward runs sit about 1.6 to 2 times higher (medians about 0.02 to 0.026)." src="actor_gradient_norm_light.png">
 </picture>
 
 ## Overall conclusions
 
-1. **No change so far makes the CT-WM actor learn within 137,680 steps.** All seven runs (baseline, 2 × actor fix,
-   2 × + reward std, 2 × + motion head) end at 0% delivery, with behaviour close to random.
+1. **No change so far makes the CT-WM actor deliver within 137,680 steps.** All nine runs end at 0% delivery:
+   baseline, 2 × actor fix, 2 × + reward std, 2 × + motion head, 2 × + normalised reward.
 2. **The imagination-scale hypothesis is rejected as the sole cause.** Up-weighting the RL term increases actor
    gradients ~3× but amplifies an uninformative signal (with slightly more out-of-bounds endings).
 3. **The learned reward-std head, in this form, is rejected and harmful.** It does not improve reward prediction,
@@ -340,19 +399,24 @@ reward std, yellow = actor fix + motion head. Seed 18 has no baseline run.
 4. **Single-step precision was a real bottleneck, and it is fixable.**
    - A normalised one-step motion head brings the latent's motion error from ~200 m to ~1–3 m, better than a
      constant-velocity guess on the agent's own flights, without harming the rest of the world model.
-5. **The remaining bottleneck is the reward head.**
-   - Even with metre-scale motion in the latent, own-flight reward correlation only reaches +0.17 to +0.32, and the
-     error is 12–19× the real variation.
-   - Rewards that vary by ~0.0015 give a unit-variance Gaussian head almost no gradient.
+5. **Normalising the reward target fixes ordinary-step reward prediction.**
+   - With the motion head in place, a symlog-normalised reward target lifts own-flight correlation from +0.17–0.32
+     to **+0.75–0.78**, with RMSE ≈ the real variation.
+6. **Once imagined rewards carry a signal, the actor does learn from them, but it exploits a biased terminal
+   prediction.**
+   - A Gaussian mean in symlog space predicts almost no penalty for ending the episode (−0.02 instead of −0.68).
+   - The actor therefore learns to fly off the map quickly: 94% out of bounds, at almost twice the speed.
+   - The terminal outcome has to be represented so that its expected value survives.
 
 **Suggested next experiments** (not run; one variable each, on top of actor fix + motion head):
 
-- **A normalised per-step reward head.** This is the motion-head recipe applied to the reward: a fixed-scale
-  normalised target for non-terminal rewards (~0.0015 std in prefill) and a unit-variance NLL. Imagined rewards
-  would use its denormalised mean. Unlike experiment 2, no learned variance is involved, so no clipping domination.
+- **A two-hot symlog reward head (DreamerV3).** A categorical distribution over symlog bins, with the expected
+  reward taken in original units (Σ p_i · symexp(bin_i)). This keeps both the ordinary-step precision of
+  experiment 4 and the full weight of rare terminal penalties.
+- **A split reward.** The normalised head on non-terminal steps, plus a raw-scale head for terminal steps,
+  combined with the predicted termination probability.
 - **Analytic shaping in imagination.** Compute γΦ(s′) − Φ(s) from the motion head's predicted displacement,
-  projected onto the goal direction, instead of learning it.
-- Give the actor the exact observation in the real environment, as the team's DreamerV2 does.
+  projected onto the goal direction.
 - Any positive result needs ≥ 3 seeds per condition. Seed 18 in these experiments has no baseline control.
 
 ## Files in this folder
@@ -361,13 +425,14 @@ reward std, yellow = actor fix + motion head. Seed 18 has no baseline run.
 |---|---|
 | `run_ablation.py`, `ablation_patches.py` | Wrapper and runtime patches (the team's code is not modified) |
 | `*_ablation.json` | Per-run record of the changes and the wrapper/patch SHA-256 |
-| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*`, `imagscale1_delta_seed{17,18}_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, motion check, `result.json`, `manifest.json` |
+| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*`, `imagscale1_delta_seed{17,18}_*`, `imagscale1_delta_rewardnorm_seed{17,18}_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, motion check, terminal-reward check (experiments 3–4), `result.json`, `manifest.json` |
 | `baseline_reward_signal.json`, `baseline_delta_check.json` | Reward and motion checks on the first report's final checkpoint |
-| `sweep_world_model.py`, `reward_signal_check.py`, `delta_check.py`, `make_figures.py` | Analysis scripts (reproduce the files and figures) |
+| `sweep_world_model.py`, `reward_signal_check.py`, `delta_check.py`, `terminal_reward_check.py`, `make_figures.py` | Analysis scripts (reproduce the files and figures) |
 | `*_light.png`, `*_dark.png` | Comparison figures |
 
 The git history records which script revision each set of runs used:
 
 - actor-fix runs: wrapper `82ec9cd`;
 - reward-fix runs: wrapper and patches `4f09dfd`;
-- motion-head runs: wrapper `228d35d`, patches `ff40afa`.
+- motion-head runs: wrapper `228d35d`, patches `ff40afa`;
+- normalised-reward runs: wrapper and patches `f032152`.
