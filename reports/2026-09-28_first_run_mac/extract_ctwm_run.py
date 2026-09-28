@@ -1,11 +1,11 @@
 """Condense a train_nrsm_online.py output directory into small, committable files.
 
 Usage (from this folder):
-    python extract_ctwm_run.py "<DV2>/outputs/<run>" ctwm_online_1h
+    python extract_ctwm_run.py "<DV2>/outputs/<run>" ctwm_online_1h [output_dir]
 
 Writes <prefix>_evaluations.json, <prefix>_train_log.csv, <prefix>_episodes.csv,
 and copies result.json / manifest.json with local absolute paths removed.
-Standard library only.
+output_dir defaults to this folder. Standard library only.
 """
 import csv
 import json
@@ -24,8 +24,9 @@ def scrub(text):
     return re.sub(r'/(?:Users|home)/[^"\s]*?/(?=outputs/|Dreamer V2/|her_mpdqn_reproduction/)', '', text)
 
 
-def main(run_dir, prefix):
-    run_dir, out = Path(run_dir), Path(__file__).resolve().parent
+def main(run_dir, prefix, output_dir=None):
+    run_dir = Path(run_dir)
+    out = Path(output_dir) if output_dir else Path(__file__).resolve().parent
     evaluations, train_rows, episode_rows = [], [], []
     with (run_dir / 'metrics.jsonl').open(encoding='utf-8') as stream:
         for line in stream:
@@ -59,4 +60,4 @@ def main(run_dir, prefix):
 
 
 if __name__ == '__main__':
-    main(*sys.argv[1:3])
+    main(*sys.argv[1:4])
