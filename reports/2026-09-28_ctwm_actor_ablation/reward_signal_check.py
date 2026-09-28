@@ -14,13 +14,10 @@ import json
 import sys
 from pathlib import Path
 
-DV2 = Path(__file__).resolve().parents[2] / 'Dreamer V2' / 'ctm_qiwei' / 'Dreamer-master'
-sys.path.insert(0, str(DV2))
-
+import ablation_patches  # noqa: E402  (puts the DV2 folder on sys.path)
 import numpy as np  # noqa: E402
 import tensorflow as tf  # noqa: E402
 
-from nrsm_online_agent import ACConfig, OnlineAgent  # noqa: E402
 from validate_nrsm import collect  # noqa: E402
 
 
@@ -42,8 +39,7 @@ def check(agent, data):
 def main(run_dir, checkpoint, output):
     tf.keras.mixed_precision.set_global_policy('float32')
     tf.keras.utils.set_random_seed(17)
-    manifest = json.loads((Path(run_dir) / 'manifest.json').read_text())
-    agent = OnlineAgent(ac_config=ACConfig(**manifest['ac_config']))   # must match the checkpoint
+    agent = ablation_patches.agent_for_run(run_dir)   # same architecture and ac_config as the checkpoint
     agent.load(checkpoint)
     files = sorted((Path(run_dir) / 'episodes').glob('*.npz'), key=lambda p: int(p.stem))[-100:]
     episodes = [np.load(f) for f in files]

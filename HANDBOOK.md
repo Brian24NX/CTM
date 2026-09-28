@@ -68,6 +68,9 @@ Recurrent Space Model)**. The full agent is **CT-WM (Continuous-Thought World Mo
   - CT-WM runs end to end and its CTM core is numerically faithful to the official code.
   - In a 1-hour run (137k steps), its **world model learned** to roughly match a "nothing changes" guess at 5–15
     steps ahead. Its **actor did not learn at all**: it stayed a random policy with 0% deliveries.
+  - Two follow-up fixes (a stronger actor signal, and a learned-variance reward head) also failed.
+  - The root cause found: the world model's position estimate is off by ~200 m, while the drone moves ~22 m per
+    step. So imagined per-step rewards carry no usable signal.
   - Early training shows enormous gradients (up to ~1e9). They settle after ~600 updates.
 - No comparison so far is a fair, matched benchmark. The open problems are listed in [§9](#9-known-issues-and-open-questions).
 
@@ -768,6 +771,8 @@ Details, commands and the small result files are in [`reports/2026-09-28_first_r
 | **CT-WM online, 1 hour, seed 17** (the team's 1-hour protocol, defaults unchanged) | **137,680 env steps and 27,380 updates** (the team's GPU managed 8,400 steps in 1 h, so ~16× faster). **0% delivery** on fixed and fresh scenes. The actor stayed statistically random for all 1,540 policy episodes |
 | CT-WM world model at all 13 checkpoints (the 8 held-out episodes of the offline check) | 1-step open-loop RMSE 1.05 → 0.24 (persistence 0.11); 15-step 1.03 → 0.44 (persistence 0.45). **Matches "nothing changes" at 15 steps and is still improving** |
 | World-model gradient norm (online run) | ~8e5 at the start, below the clip (100) from update ~630, then a median of 23. **The explosion is an early transient** |
+| **Ablations** (4 runs, each 137,680 steps; [`reports/2026-09-28_ctwm_actor_ablation/`](reports/2026-09-28_ctwm_actor_ablation/README.md)) | `imagination_scale` 1.0, seeds 17 and 18: actor gradients ~3× larger, behaviour still random. Adding a learned-variance reward head: reward prediction not improved, and the world model got worse (gradient-clipping domination). **All pre-registered criteria failed; 0% delivery in every run** |
+| Root cause of the uninformative reward signal | The world model's 1-step position error is a median of **~210–230 m**, against ~22 m of actual movement per step. The team's DreamerV2 shows the same pattern (273–294 m) |
 
 ---
 
@@ -812,11 +817,20 @@ The list is prioritised. "Confirmed" means shown by code or a minimal reproducti
     - After 1 hour online (27k updates), the model matches persistence at 15 steps, is close at 5 steps, and is
       still 2.3× worse at 1 step. It is still improving.
     - The posterior/prior feature gap should be tracked (`diagnose_nrsm_context.py`).
-11. **The CT-WM actor does not learn, confirmed in the 2026-09-28 1-hour run.** Over 1,540 policy episodes its
-    action statistics never left those of the random prefill, and its gradient norm is ~0.01.
-    - Hypothesis: its loss is DreamerV2's actor loss without the 5× behaviour-cloning term. The RL term is scaled by
-      0.1, but the entropy bonus is not, so the only learning signal may be drowned out.
-    - Test it by varying `ACConfig.imagination_scale` (e.g. 1.0) and/or the entropy coefficients, one at a time.
+11. **The CT-WM actor does not learn**, as shown by the 2026-09-28 1-hour run. Over 1,540 policy episodes its action
+    statistics never left those of the random prefill. Two fixes were tested with pre-registered criteria
+    ([report](reports/2026-09-28_ctwm_actor_ablation/README.md)):
+    - `imagination_scale` 0.1 → 1.0: actor gradients grew ~3×, but behaviour stayed random, with slightly more
+      out-of-bounds endings. **Rejected as the sole cause.**
+    - A learned-variance reward head on top: the head became confident without becoming accurate. Its gradients
+      dominated the clipped world-model updates (median norm 174 against 23) and degraded state prediction.
+      **Rejected in this form.**
+    - **Root cause, confirmed.** On ordinary steps, imagined rewards are uninformative: correlation with real rewards
+      is ~0 on the agent's own flights, and negative on goal-directed ones. That is because the world model's position
+      error (~200 m) is ~10× one step of motion (~22 m), so per-step shaping cannot be resolved.
+    - Next: improve single-step precision (predict Δ-state, or up-weight position/goal dimensions); give the actor
+      the exact observation, as DreamerV2 does; or derive shaping from a predicted potential. Measure position error
+      in metres.
 12. **No matched comparison yet:** CT-WM differs from our DreamerV2 in actor input (latent vs. exact), use of
     demonstrations (none vs. 64), batch size (2 × 101 vs. 50 × 20) and model size. A fair comparison must match these
     or ablate them.

@@ -80,6 +80,153 @@ applied *on top of the actor fix* (`imagination_scale = 1.0`) and compared seed-
   distance < 820 m **or** pickups ≥ 10%. Also better than the actor-fix run of the same seed on both measures.
 - **Guardrail:** the world model's 15-step open-loop vector RMSE is not more than 10% worse than the actor-fix run's.
 
-## Results
+## Results: experiment 1, actor fix (`imagination_scale = 1.0`)
 
-_Added when the runs finish._
+Both runs completed exactly 137,680 environment steps (27,330 / 27,336 actor-critic updates, ~82 min each while
+sharing the CPU), and checkpoint restore was verified.
+
+**Verdict against the pre-registered criteria: H1 is not met, so H0 holds.** The actor fix alone does not make
+the actor learn.
+
+Policy (training) episodes, by quarter. The baseline is the first report's run.
+
+| Run | Quarter | MOVE share | Mean MOVE param | Mean speed | Final distance to active goal | Pickup | Delivery | Out of bounds |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| Baseline, seed 17 | Q4 | 0.50 | +0.01 | 6.6 m/step | 1,024 m | 2.1% | 0% | 24% |
+| Actor fix, seed 17 | Q1 → Q4 | 0.49 → 0.51 | +0.02 | 7.1 → 7.0 m/step | 1,046 → **1,054 m** | 1.3 → **2.3%** | 0–0.3% | 26 → 33% |
+| Actor fix, seed 18 | Q1 → Q4 | 0.50 → 0.50 | +0.03 → +0.02 | 7.2 → 6.7 m/step | 1,028 → **1,044 m** | 1.0 → **1.2%** | 0% | 29 → 39% |
+
+The thresholds were < 820 m final distance or ≥ 10% pickups. Neither run comes close; both stay at the random
+prefill's level (~1,150 m, 0–2% pickups).
+
+**The change did take effect.**
+
+- The actor's gradient-norm median rose from 0.012 (baseline) to 0.034 / 0.037.
+- But the extra push produced no progress toward the goal. It came with *more* out-of-bounds endings (24% → 33% /
+  39% in the last quarter).
+- Deterministic evaluation: 0% delivery at every one of the 18 fixed-scene checkpoints in both seeds. Pickups peaked
+  at 10% / 20% at single checkpoints, and the final fixed and fresh scenes show 0% pickup. Over 3,237 training
+  episodes there was one delivery (seed 17).
+
+**Why: the signal it amplifies is not informative** (`reward_signal_check.py`, final checkpoints):
+
+| Run | Own flights: RMSE / actual std | Own flights: correlation | Controller flights: correlation |
+|---|---:|---:|---:|
+| Baseline, seed 17 | 8.1× | +0.07 | −0.23 |
+| Actor fix, seed 17 | 8.1× | +0.25 | −0.34 |
+| Actor fix, seed 18 | 37.6× | +0.06 | −0.19 |
+
+On ordinary steps, the world model still cannot tell better moves from worse ones. On goal-directed flights its
+predictions point the wrong way.
+
+- Seed 18, with the most −1 out-of-bounds endings in its replay, has the largest errors. That fits the
+  "one fixed-width head is pulled by rare ±1 rewards" diagnosis.
+- Its state predictions are unaffected by the actor change: the 15-step open-loop RMSE at the end is 0.441 / 0.403,
+  against 0.444 for the baseline and 0.448 for persistence.
+
+**Conclusion.** Down-weighting of the RL term is not the only reason the actor fails. Weighting it up does not
+help, because imagined rewards carry almost no usable signal. This makes experiment 2, which targets the reward
+head, the critical test.
+
+## Results: experiment 2, actor fix + learned reward std
+
+Both runs completed exactly 137,680 steps (~85 min each), and checkpoint restore was verified.
+
+**Verdict against the pre-registered criteria: all three fail.**
+
+| Run | Own flights: correlation (≥ 0.3?) | RMSE / std (≤ 3?) | Final distance, Q4 (< 820 m?) | Pickups, Q4 (≥ 10%?) | 15-step open-loop RMSE (guardrail: ≤ 1.1× actor fix) |
+|---|---:|---:|---:|---:|---:|
+| Actor fix, seed 17 | +0.25 | 8.1× | 1,054 m | 2.3% | 0.441 |
+| **+ learned reward std, seed 17** | **+0.08** ✗ | **9.9×** ✗ | **1,012 m** ✗ | **1.8%** ✗ | **0.563** ✗ (+28%) |
+| Actor fix, seed 18 | +0.06 | 37.6× | 1,044 m | 1.2% | 0.403 |
+| **+ learned reward std, seed 18** | **−0.02** ✗ | **9.5×** ✗ | **1,019 m** ✗ | **1.8%** ✗ | **0.662** ✗ (+64%) |
+
+Deterministic evaluation: 0% delivery at every checkpoint of both seeds. Final fixed / fresh pickups were 0% / 2%
+(seed 17) and 5% / 0% (seed 18).
+
+**What happened** (training logs):
+
+- The head became confident: the reward NLL fell from +0.75 to −3.3, which means its predicted std sat at the 0.01
+  floor. Its errors on ordinary steps did not shrink (RMSE ≈ 0.009–0.015).
+- A confident head with unchanged errors produces large gradients. The world-model gradient norm had a median of
+  **174 after the first 1,000 updates, against 23 in the baseline**. Almost every update was therefore clipped
+  to 100.
+- Under global-norm clipping, the reward term then dominates each update. The state predictions degrade (1-step
+  open-loop RMSE 0.43 / 0.65, against 0.23 / 0.20 for the actor fix), and the policy still does not improve.
+
+**Root cause: the world model cannot see the effect of a single step.** A per-dimension check on the 8 held-out
+episodes:
+
+| Final checkpoint | 1-step prior position error (median) | Active-goal offset error (median) |
+|---|---:|---:|
+| Baseline, seed 17 | 221 m | 206 m |
+| Actor fix, seed 18 | 211 m | 213 m |
+| Actual movement per step in those flights | 22 m (max 40 m) | n/a |
+
+- The per-step shaping reward depends on how much one step (≤ 40 m) changes the remaining route. The model's
+  position estimate is uncertain by ~10× that, so no reward head, whether fixed or learned-width, can recover the
+  signal from these features.
+- The team's DreamerV2 diagnosis shows the same pattern: 1-step position error of 273–294 m, against 15–17 m for
+  persistence (`STAGE1_RESULTS_20260910.md` §4). This looks like a shared world-model bottleneck, not something
+  specific to CTM.
+
+## Figures
+
+One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned
+reward std. Seed 18 has no baseline run.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="final_distance_to_goal_dark.png">
+  <img alt="Two-panel line chart (seeds 17 and 18) of the rolling mean distance to the active goal at the end of training episodes. All five runs stay between about 950 and 1,200 m for the whole 137,680 steps; none trends down toward the 820 m threshold." src="final_distance_to_goal_light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="training_pickup_rate_dark.png">
+  <img alt="Two-panel line chart of the rolling pickup rate in training episodes. Every condition fluctuates between 0% and 7% with no upward trend; the pre-registered threshold was 10%." src="training_pickup_rate_light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="world_model_15step_dark.png">
+  <img alt="Two-panel log-scale line chart of the world model's 15-step open-loop error divided by the persistence error over world-model updates. The baseline and actor-fix runs fall from about x2.2 to about x1.0; the learned-reward-std runs plateau around x1.3 to x1.5." src="world_model_15step_light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="actor_gradient_norm_dark.png">
+  <img alt="Two-panel log-scale line chart of the actor gradient norm over actor-critic updates. The baseline's median is about 0.012; the actor-fix runs sit about 3 times higher (median about 0.035) and the reward-fix runs about 1.6 times higher (median about 0.02)." src="actor_gradient_norm_light.png">
+</picture>
+
+## Overall conclusions
+
+1. **Neither fix makes the CT-WM actor learn within 137,680 steps.** All five runs (baseline, 2 × actor fix,
+   2 × actor fix + reward fix) end at 0% delivery, with behaviour indistinguishable from random.
+2. **The imagination-scale hypothesis is rejected as the sole cause.** Up-weighting the RL term increases actor
+   gradients ~3× but amplifies an uninformative signal (with slightly more out-of-bounds endings).
+3. **The learned reward-std head, in this form, is rejected and harmful.** It does not improve reward prediction,
+   and it degrades the world model through gradient clipping. If it is retried, the reward term needs its own
+   weighting or a separate clip, or a larger `min_std`.
+4. **The bottleneck is the world model's precision at single-step scale.** Its position error (~200 m) is about 10×
+   one step of motion. Until it can resolve single steps, imagined per-step rewards cannot guide the actor.
+
+**Suggested next experiments** (not run; one variable each):
+
+- Predict state changes (Δ-vectors, i.e. residual decoding) instead of absolute states, or up-weight the position
+  and goal-offset dimensions. Measure the position error in metres against the 22 m/step scale.
+- Give the actor the exact observation in the real environment, as the team's DreamerV2 does. Then imagination only
+  has to rank actions, not localise the drone.
+- Derive shaping in imagination from a predicted potential Φ(s) (remaining route length), rather than predicting each
+  per-step reward difference.
+- Any positive result needs ≥ 3 seeds per condition. Seed 18 in these experiments has no baseline control.
+
+## Files in this folder
+
+| File | Content |
+|---|---|
+| `run_ablation.py`, `ablation_patches.py` | Wrapper and runtime patches (the team's code is not modified) |
+| `*_ablation.json` | Per-run record of the changes and the wrapper/patch SHA-256 |
+| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, `result.json`, `manifest.json` |
+| `baseline_reward_signal.json` | Reward check on the first report's final checkpoint |
+| `sweep_world_model.py`, `reward_signal_check.py`, `make_figures.py` | Analysis scripts (reproduce the files and figures) |
+| `*_light.png`, `*_dark.png` | Comparison figures |
+
+The git history shows each script's revision: `82ec9cd` is the wrapper the actor-fix runs used, and `4f09dfd` is
+the one the reward-fix runs used.
