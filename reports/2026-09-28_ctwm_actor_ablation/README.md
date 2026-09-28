@@ -92,9 +92,9 @@ Policy (training) episodes, by quarter. The baseline is the first report's run.
 
 | Run | Quarter | MOVE share | Mean MOVE param | Mean speed | Final distance to active goal | Pickup | Delivery | Out of bounds |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| Baseline, seed 17 | Q4 | 0.50 | +0.01 | 6.6 m/step | 1,024 m | 2.1% | 0% | 24% |
-| Actor fix, seed 17 | Q1 → Q4 | 0.49 → 0.51 | +0.02 | 7.1 → 7.0 m/step | 1,046 → **1,054 m** | 1.3 → **2.3%** | 0–0.3% | 26 → 33% |
-| Actor fix, seed 18 | Q1 → Q4 | 0.50 → 0.50 | +0.03 → +0.02 | 7.2 → 6.7 m/step | 1,028 → **1,044 m** | 1.0 → **1.2%** | 0% | 29 → 39% |
+| Baseline, seed 17 | Q4 | 0.50 | +0.01 | 6.7 m/step | 1,024 m | 2.1% | 0% | 24% |
+| Actor fix, seed 17 | Q1 → Q4 | 0.49 → 0.51 | +0.02 | 7.2 → 7.1 m/step | 1,046 → **1,054 m** | 1.3 → **2.3%** | 0–0.3% | 26 → 33% |
+| Actor fix, seed 18 | Q1 → Q4 | 0.50 → 0.50 | +0.03 → +0.02 | 7.3 → 6.8 m/step | 1,028 → **1,044 m** | 1.0 → **1.2%** | 0% | 29 → 39% |
 
 The thresholds were < 820 m final distance or ≥ 10% pickups. Neither run comes close; both stay at the random
 prefill's level (~1,150 m, 0–2% pickups).

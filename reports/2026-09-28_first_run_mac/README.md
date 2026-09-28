@@ -10,7 +10,8 @@ only pins it for Linux and Windows.
 - Machine: Apple M4 (4 performance + 6 efficiency cores), 16 GB RAM, macOS 15.6.1. **CPU only**.
 - Code: `MadaoShall-1/CTM@14d29c2`.
 - Python 3.12.12.
-  - World-model environment: TensorFlow 2.21.0, TensorFlow Probability 0.25.0, gymnasium 1.3.0, numpy 2.5.3.
+  - World-model environment: TensorFlow 2.21.0, TensorFlow Probability 0.25.0, gymnasium 1.3.0, numpy 2.3.5
+    (resolved from `requirements.txt`, which caps numpy below 2.4).
   - Baseline environment: PyTorch 2.14.0, gymnasium 1.3.0, numpy 2.5.3.
 
 All numbers below are short, single-seed engineering checks. **They are not benchmark results.** See
@@ -129,11 +130,11 @@ passed. The team's 1-hour run on an RTX 5070 Ti laptop GPU (`NRSM_FULL_RUN_20260
 
 | Training episodes | MOVE share | Mean MOVE param | Mean \|TURN param\| | Mean speed | Final distance to active goal | Pickup | Out of bounds |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Random prefill (12) | 0.50 | +0.05 | 0.48 | 7.3 m/step | 1,151 m | 0.0% | 33% |
-| Policy, 1st quarter (385) | 0.50 | +0.01 | 0.52 | 7.0 m/step | 1,023 m | 0.8% | 25% |
-| Policy, 2nd quarter (385) | 0.51 | +0.02 | 0.52 | 6.9 m/step | 1,025 m | 1.8% | 28% |
+| Random prefill (12) | 0.50 | +0.05 | 0.48 | 7.4 m/step | 1,151 m | 0.0% | 33% |
+| Policy, 1st quarter (385) | 0.50 | +0.01 | 0.52 | 7.1 m/step | 1,023 m | 0.8% | 25% |
+| Policy, 2nd quarter (385) | 0.51 | +0.02 | 0.52 | 7.0 m/step | 1,025 m | 1.8% | 28% |
 | Policy, 3rd quarter (385) | 0.51 | +0.02 | 0.51 | 7.1 m/step | 1,010 m | 1.0% | 28% |
-| Policy, 4th quarter (385) | 0.50 | +0.01 | 0.51 | 6.6 m/step | 1,024 m | 2.1% | 24% |
+| Policy, 4th quarter (385) | 0.50 | +0.01 | 0.51 | 6.7 m/step | 1,024 m | 2.1% | 24% |
 
 A uniformly random action gives MOVE share 0.5, mean parameter 0 and mean |parameter| 0.5, which is what every row shows.
 The actor's gradient norm has a median of **0.012**, versus 0.43 for the critic.
@@ -225,12 +226,22 @@ export PYTHONPATH="$PWD:$PWD/tests" TF_CPP_MIN_LOG_LEVEL=2
 ~/.venvs/ctm-dreamer/bin/python -B -u train_nrsm_online.py --output outputs/<new> --duration-seconds 3600
 ```
 
-To regenerate the small files and figures in this folder from a run directory:
+To regenerate every small file and figure in this folder from the run directory, run this self-contained block
+from the repo root:
 
 ```bash
-python extract_ctwm_run.py "../../Dreamer V2/ctm_qiwei/Dreamer-master/outputs/<run>" ctwm_online_1h
+cd reports/2026-09-28_first_run_mac
+RUN="../../Dreamer V2/ctm_qiwei/Dreamer-master/outputs/<run>"
+~/.venvs/ctm-baseline/bin/python extract_ctwm_run.py "$RUN" ctwm_online_1h
+~/.venvs/ctm-baseline/bin/python action_stats.py "$RUN" ctwm_online_1h_action_stats.csv
+mkdir -p /tmp/ctwm_sweep && for c in "$RUN"/checkpoint_env*.pkl; do
+  ~/.venvs/ctm-dreamer/bin/python -B eval_ctwm_world_model.py "$c" "/tmp/ctwm_sweep/$(basename "$c" .pkl).json"; done
+python3 -c "import json, glob; rows = sorted((json.load(open(p)) for p in glob.glob('/tmp/ctwm_sweep/*.json')), key=lambda r: r['counts']['model_updates']); json.dump(rows, open('ctwm_online_1h_world_model_evals.json', 'w'), indent=1)"
 ~/.venvs/ctm-baseline/bin/python make_figures.py
 ```
+
+`../2026-09-28_ctwm_actor_ablation/sweep_world_model.py` does the world-model sweep in one process and gives
+identical results.
 
 ## Files in this folder
 
@@ -241,6 +252,6 @@ python extract_ctwm_run.py "../../Dreamer V2/ctm_qiwei/Dreamer-master/outputs/<r
 | `baselines_direct_6000steps_*` | Per-run and aggregate baseline results |
 | `ctwm_online_1h_*` | CT-WM run: evaluations (with per-scene outcomes), training log, per-episode outcomes, `result.json`, `manifest.json` |
 | `*_light.png`, `*_dark.png` | Figures (`make_figures.py`) |
-| `extract_ctwm_run.py`, `make_figures.py` | Scripts that produce the files above |
+| `extract_ctwm_run.py`, `action_stats.py`, `eval_ctwm_world_model.py`, `make_figures.py` | Scripts that produce the files above |
 
 Checkpoints, replay and full logs stay local under each code line's git-ignored `outputs/mac_first_run_20260928/`.

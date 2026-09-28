@@ -15,8 +15,10 @@ def main(run_dir, output):
     for path in sorted(Path(run_dir, 'episodes').glob('*.npz'), key=lambda p: int(p.stem)):
         episode = np.load(path)
         valid = episode['valid'] > 0
+        # Row 0 is the reset observation with no preceding action: drop it from both, so every
+        # statistic covers the same post-action steps.
         action = episode['action'][valid][1:]
-        vector = episode['vector'][valid]
+        vector = episode['vector'][valid][1:]
         move, turn = action[:, 0] > .5, action[:, 1] > .5
         rows.append(dict(
             scene=int(path.stem), steps=len(action), move_share=float(move.mean()),
