@@ -42,6 +42,44 @@ distance, 2.1% pickups, MOVE share 0.50):
 - **Secondary:** delivery and pickup in the deterministic evaluations, and world-model prediction error (the same
   sweep as the first report).
 
+## Second experiment: learned-variance reward head (pre-registered)
+
+_Written at 02:37 CDT, while the actor-fix runs were at ~23k of 137,680 steps. Only their 5-minute evaluations
+(all 0% delivery) had been seen._
+
+**Motivation (measured on the baseline's final checkpoint, `baseline_reward_signal.json`).** On ordinary
+(non-terminal) steps, the goal_safe_v1 reward is −0.01 plus potential shaping. Its informative variation is tiny:
+std 0.0015 on the agent's own flights. The world model's reward predictions are much worse than that:
+
+| Data | Actual std | Prediction RMSE | Correlation with actual |
+|---|---:|---:|---:|
+| Agent's last 100 training episodes | 0.0015 | 0.012 (8× the std) | +0.05 to +0.07 |
+| Held-out random flights | 0.0017 | 0.008–0.009 | +0.33 |
+| Held-out controller flights | 0.0028 | 0.016 | −0.21 to −0.23 |
+
+So imagination gives the actor almost no information about which steps are better. The reward head is a
+**fixed unit-variance Gaussian** (`models.DenseHead`, `Normal(x, 1)`), and it has to fit both these ~0.001-scale
+differences and the rare ±1 terminal rewards.
+
+**Hypothesis.** A reward head that predicts its own per-state standard deviation can be precise on ordinary steps
+and uncertain on terminal steps. That should raise the informativeness of imagined rewards and give the actor a
+usable signal.
+
+**Change.** `ablation_patches.LearnedStdHead`, with `std = 0.01 + softplus(raw)`, is the only change. It is
+applied *on top of the actor fix* (`imagination_scale = 1.0`) and compared seed-for-seed with the actor-fix runs.
+
+- Everything else is identical: the task and reward (goal_safe_v1, shaping 1.0), the loss (still the reward NLL),
+  budget 137,680 steps, seeds 17 and 18.
+- The team's manifest does not record this change. `<run>.ablation.json` does.
+
+**Criteria**, compared with the actor-fix run of the same seed:
+
+- **Mechanism (primary for this change):** on the agent's own last 100 episodes, the correlation between predicted
+  and actual non-terminal rewards is **≥ 0.3**, and RMSE / std is **≤ 3** (the fixed head gives 0.05–0.07 and ~8).
+- **Behaviour:** the same thresholds as the first experiment, on the last quarter of policy episodes: final
+  distance < 820 m **or** pickups ≥ 10%. Also better than the actor-fix run of the same seed on both measures.
+- **Guardrail:** the world model's 15-step open-loop vector RMSE is not more than 10% worse than the actor-fix run's.
+
 ## Results
 
 _Added when the runs finish._
