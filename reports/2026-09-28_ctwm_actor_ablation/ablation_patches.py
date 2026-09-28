@@ -18,6 +18,15 @@ become O(1) targets, while symlog keeps the rare +/-1 terminal rewards represent
 dominating. mean() returns the reward in original units, so the team's world loss (log_prob) and actor
 objective (mean) run unchanged.
 
+reward_twohot (experiment 5): the reward head outputs logits over TWOHOT_BINS in the same normalised symlog
+space as reward_norm, trained with DreamerV3's two-hot cross-entropy (danijar/dreamerv3@e3f02248693a,
+embodied/jax/outs.py). One deliberate difference: DreamerV3 predicts symexp(sum_i p_i * bin_i), an average
+in squashed space, which is the averaging that erased the terminal penalty in experiment 4. Here the
+prediction is REWARD_MU + REWARD_SIGMA * sum_i p_i * symexp(bin_i), the expectation in original units, so a
+p-weighted terminal outcome keeps its full penalty. Hidden layers match the team's reward network. The
+output layer is zero-initialised (DreamerV3 practice; uniform probabilities predict exactly REWARD_MU) by
+zeroing it after default creation, so the shared random stream, and hence seed pairing, is unchanged.
+
 Training (run_ablation.py) and analysis scripts build agents through agent_for_run()/apply(), so a
 checkpoint is always loaded into the architecture that produced it.
 """
@@ -29,6 +38,7 @@ DV2 = Path(__file__).resolve().parents[2] / 'Dreamer V2' / 'ctm_qiwei' / 'Dreame
 if str(DV2) not in sys.path:
     sys.path.insert(0, str(DV2))
 
+import numpy as np  # noqa: E402
 import tensorflow as tf  # noqa: E402
 from tensorflow.keras import layers as tfkl  # noqa: E402
 from tensorflow_probability import distributions as tfd  # noqa: E402
@@ -42,6 +52,11 @@ REWARD_STD_KEY = 'world_model.reward_head_min_std'
 REWARD_NORM_KEY = 'world_model.reward_head_normalised'
 # Mean/std of the 1,018 non-terminal rewards in the same 12 random-prefill episodes as DELTA_SCALE.
 REWARD_MU, REWARD_SIGMA = -0.007229, 0.001387
+REWARD_TWOHOT_KEY = 'world_model.reward_head_twohot'
+# 255 bins, exactly mirror-symmetric with one at 0, spanning ordinary steps (|symlog z| <= ~1.6) and terminal
+# rewards (~+/-6.6).
+_HALF = np.linspace(0.0, 7.5, 128)
+TWOHOT_BINS = tuple(float(x) for x in np.concatenate([-_HALF[:0:-1], _HALF]))
 DELTA_KEY = 'world_model.delta_head_weight'
 DELTA_DIMS = (0, 1, 2, 3, 4)   # x, y, speed, sin(heading), cos(heading) of the 13-vector
 # Std of one-step changes in the 12 random-prefill episodes (1,030 transitions) of the 2026-09-28
@@ -121,6 +136,65 @@ class NormalisedRewardHead(tools.Module):
         return NormalisedReward(self.net(features).mean())
 
 
+def symmetric_sum(probs, values):
+    """sum(probs * values) over the last axis, pairing bins from the centre outwards (as in DreamerV3's
+    TwoHot.pred), so symmetric bins with uniform probabilities give exactly zero."""
+    m = (probs.shape[-1] - 1) // 2
+    left = (probs[..., :m] * values[:m])[..., ::-1]
+    return probs[..., m] * values[m] + tf.reduce_sum(left + probs[..., m + 1:] * values[m + 1:], -1)
+
+
+class TwoHotReward:
+    """Categorical reward over TWOHOT_BINS (normalised symlog space) with a mean in original units."""
+
+    def __init__(self, logits):
+        self.logits = logits
+        self.bins = tf.constant(TWOHOT_BINS, tf.float32)
+
+    def target_weights(self, reward):
+        """Two-hot encoding of symlog((r - mu) / sigma) (clipped to the bin range) over the two nearest bins."""
+        target = symlog((tf.cast(reward, tf.float32) - REWARD_MU) / REWARD_SIGMA)
+        target = tf.clip_by_value(target, self.bins[0], self.bins[-1])
+        count = len(TWOHOT_BINS)
+        below = tf.clip_by_value(tf.reduce_sum(tf.cast(self.bins <= target[..., None], tf.int32), -1) - 1, 0, count - 1)
+        above = tf.clip_by_value(count - tf.reduce_sum(tf.cast(self.bins > target[..., None], tf.int32), -1), 0, count - 1)
+        equal = tf.equal(below, above)
+        to_below = tf.where(equal, 1., tf.abs(tf.gather(self.bins, below) - target))
+        to_above = tf.where(equal, 1., tf.abs(tf.gather(self.bins, above) - target))
+        return (tf.one_hot(below, count) * (to_above / (to_below + to_above))[..., None]
+                + tf.one_hot(above, count) * (to_below / (to_below + to_above))[..., None])
+
+    def log_prob(self, reward):
+        weights = tf.stop_gradient(self.target_weights(reward))
+        return tf.reduce_sum(weights * tf.nn.log_softmax(self.logits, -1), -1)
+
+    def mean(self):
+        return REWARD_MU + REWARD_SIGMA * symmetric_sum(tf.nn.softmax(self.logits, -1), symexp(self.bins))
+
+    mode = mean
+
+
+class TwoHotRewardHead(tools.Module):
+    """Hidden layers as models.DenseHead; a zero-initialised output layer with len(TWOHOT_BINS) logits."""
+
+    def __init__(self, units, layers=2, act=tf.nn.elu):
+        super().__init__()
+        self._units, self._layers, self._act, self._zeroed = units, layers, act, False
+
+    def __call__(self, features):
+        x = features
+        for index in range(self._layers):
+            x = self.get(f'h{index}', tfkl.Dense, self._units, self._act)(x)
+        out = self.get('out', tfkl.Dense, len(TWOHOT_BINS))
+        logits = out(x)
+        if not self._zeroed:   # first (eager) call: layer just created with the default initialiser
+            for variable in out.weights:
+                variable.assign(tf.zeros_like(variable))
+            self._zeroed = True
+            logits = out(x)
+        return TwoHotReward(logits)
+
+
 def delta_targets(vector):
     """Normalised one-step changes [B, T-1, 5] of the motion coordinates."""
     dims = list(DELTA_DIMS)
@@ -133,11 +207,11 @@ def delta_mask(data):
     return data['valid'][:, 1:] * (1. - data['is_first'][:, 1:]) * data['valid'][:, :-1]
 
 
-def world_model_class(learned_reward_std=None, delta_weight=None, reward_norm=False):
+def world_model_class(learned_reward_std=None, delta_weight=None, reward_norm=False, reward_twohot=False):
     base = validate_nrsm.DiagnosticWorldModel
-    if learned_reward_std and reward_norm:
-        raise ValueError('learned_reward_std and reward_norm both replace the reward head')
-    if not learned_reward_std and not delta_weight and not reward_norm:
+    if sum(bool(x) for x in (learned_reward_std, reward_norm, reward_twohot)) > 1:
+        raise ValueError('learned_reward_std, reward_norm and reward_twohot each replace the reward head')
+    if not learned_reward_std and not delta_weight and not reward_norm and not reward_twohot:
         return base
 
     class AblationWorldModel(base):
@@ -148,6 +222,8 @@ def world_model_class(learned_reward_std=None, delta_weight=None, reward_norm=Fa
                 self.reward = LearnedStdHead(layers=2, units=config.hidden, min_std=learned_reward_std)
             if reward_norm:
                 self.reward = NormalisedRewardHead(units=config.hidden)
+            if reward_twohot:
+                self.reward = TwoHotRewardHead(units=config.hidden)
             if delta_weight:
                 self.delta_weight = float(delta_weight)
                 self.delta = MotionHead(len(DELTA_DIMS), layers=2, units=config.hidden)
@@ -169,9 +245,10 @@ def _world_loss_with_delta(self, data):
     return post, loss, dict(metrics, model_loss=loss, delta_nll=delta_nll)
 
 
-def apply(learned_reward_std=None, delta_weight=None, reward_norm=False):
+def apply(learned_reward_std=None, delta_weight=None, reward_norm=False, reward_twohot=False):
     """Every OnlineAgent built after this call uses the selected world model and loss."""
-    nrsm_online_agent.DiagnosticWorldModel = world_model_class(learned_reward_std, delta_weight, reward_norm)
+    nrsm_online_agent.DiagnosticWorldModel = world_model_class(
+        learned_reward_std, delta_weight, reward_norm, reward_twohot)
     nrsm_online_agent.OnlineAgent.world_loss = (
         _world_loss_with_delta if delta_weight else _ORIGINAL_WORLD_LOSS)
 
@@ -186,5 +263,6 @@ def agent_for_run(run_dir):
     manifest = json.loads((Path(run_dir) / 'manifest.json').read_text())
     changes = run_changes(run_dir)
     apply(changes.get(REWARD_STD_KEY, [None, None])[1], changes.get(DELTA_KEY, [None, None])[1],
-          bool(changes.get(REWARD_NORM_KEY, [False, False])[1]))
+          bool(changes.get(REWARD_NORM_KEY, [False, False])[1]),
+          bool(changes.get(REWARD_TWOHOT_KEY, [False, False])[1]))
     return nrsm_online_agent.OnlineAgent(ac_config=nrsm_online_agent.ACConfig(**manifest['ac_config']))

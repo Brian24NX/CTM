@@ -351,10 +351,72 @@ Deterministic evaluation also shows 0% delivery, but 90–100% out-of-bounds end
 **Next step (not run).** Keep the normalised treatment of ordinary steps, but represent the reward as a
 distribution whose mean is taken in the original units.
 
-- DreamerV3's *two-hot* symlog bins do this: the expected reward is Σ p_i · symexp(bin_i), so rare large penalties
-  keep their full weight.
+- A categorical distribution over symlog bins, trained with DreamerV3's *two-hot* loss, can do this if its expected
+  reward is taken as Σ p_i · symexp(bin_i). Rare large penalties then keep their full weight.
+  - _Correction (added before experiment 5): this bullet first said that DreamerV3 itself computes
+    Σ p_i · symexp(bin_i). It does not. Its read-out, `TwoHot.pred()`, returns symexp(Σ p_i · bin_i), an average in
+    squashed space (danijar/dreamerv3@e3f02248693a, `embodied/jax/outs.py`). Experiment 5 uses the original-units
+    expectation on purpose._
 - An alternative is to split the reward: the normalised head on non-terminal steps, a separate raw-scale head for
   terminal steps, weighted by the predicted termination probability.
+
+## Fifth experiment: two-hot reward head (pre-registered)
+
+_Written at 18:44 CDT, before launch._
+
+**Motivation (experiment 4).**
+- The normalised head predicts ordinary steps well (correlation +0.75 / +0.78).
+- It predicts almost no penalty on episode-ending steps: −0.022 / −0.014, against an actual −0.68.
+- The reason: a single Gaussian in symlog space averages the rare terminal target with the common ordinary ones, and
+  symexp maps that in-between value to a tiny penalty.
+- In the environment's discounted return, every failing episode is worth about the same, whenever it ends:
+  timeouts end at −0.70 and out-of-bounds at −0.66, and the −0.01 step cost is sized for this.
+- In imagination, though, leaving the map skipped the penalty and saved the step costs, and the actor learned to do
+  that (94% out of bounds).
+
+**Change.** `ablation_patches` gains a `reward_twohot` option (`--twohot-reward`), which replaces experiment 4's
+reward head. This is the only change from experiment 4.
+
+- **Target space.** The same normalised space as experiment 4: `symlog((r − μ) / σ)`, with the same μ and σ.
+- **Bins.** The head outputs logits over 255 bins, evenly spaced on [−7.5, 7.5] in that space: mirror-symmetric,
+  with one bin at 0.
+  - Ordinary steps span about ±1.6 and terminal rewards about ±6.6. The edges correspond to about ±2.5 in reward
+    units.
+  - All ~1.6 million rewards logged in these runs so far lie within [−0.995, +1.003].
+- **Training.** DreamerV3's two-hot cross-entropy: each target is split linearly between its two nearest bins.
+- **Prediction.** The expectation in original units, μ + σ · Σ p_i · symexp(bin_i). A terminal outcome with
+  probability p therefore keeps its p-weighted penalty.
+  - DreamerV3's own read-out, symexp(Σ p_i · bin_i), averages in squashed space, as experiment 4 did.
+  - Unit check on a mix of an ordinary step and a −0.68 ending:
+
+    | Probability of ending | True mean | This head | DreamerV3 read-out |
+    |---|---:|---:|---:|
+    | p = 0.5 | −0.344 | −0.344 | −0.036 |
+    | p = 0.1 | −0.075 | −0.075 | −0.008 |
+- **Initialisation.** The hidden layers are the team's reward network, with the same initial weights.
+  - The output layer is zero-initialised (DreamerV3 practice), so the first prediction is exactly μ.
+  - It is zeroed after default creation, so the shared random stream, and hence seed pairing, is unchanged.
+- **Comparison.** Applied on top of the actor fix and the motion head. Compared seed-for-seed with experiment 4
+  (seeds 17 and 18, 137,680 steps).
+- **Pairing, verified:**
+  - All other initial weights are bit-identical to experiment 4.
+  - Short runs' step-0 evaluations reproduce 0 / 5 / 70 / 30% (seed 17) and 0 / 5 / 0 / 100% (seed 18).
+
+**Criteria**, compared with experiment 4 on the same seed:
+
+- **Mechanism A (primary):** on the agent's own last 100 episodes (`terminal_reward_check.py`), the predicted
+  reward on episode-ending steps is **≥ 50%** of the actual mean. For comparison:
+  - experiment 4: 3% / 2% (−0.022 / −0.014 against −0.68);
+  - experiment 3: 61% / 42%.
+- **Mechanism B:** ordinary-step prediction stays good. Non-terminal correlation is **≥ 0.3** and RMSE / std is
+  **≤ 3** (experiment 4: +0.75 / +0.78, 1.0× / 0.8×).
+- **Behaviour:** in the last quarter of policy episodes, final distance < 820 m **or** pickups ≥ 10%. It must also
+  be better than experiment 4 on the same seed on both.
+  - Also reported: the out-of-bounds rate (experiment 4: 94% / 94%) and deterministic delivery.
+- **Guardrails:**
+  - The 15-step open-loop vector RMSE is ≤ 1.1× experiment 4's (0.382 / 0.441).
+  - The motion head's held-out 1-step error stays ≤ 11 m.
+  - The median world-model gradient norm after 1,000 updates is ≤ 70.
 
 ## Figures
 
@@ -410,9 +472,10 @@ baseline run.
 
 **Suggested next experiments** (not run; one variable each, on top of actor fix + motion head):
 
-- **A two-hot symlog reward head (DreamerV3).** A categorical distribution over symlog bins, with the expected
-  reward taken in original units (Σ p_i · symexp(bin_i)). This keeps both the ordinary-step precision of
-  experiment 4 and the full weight of rare terminal penalties.
+- **A two-hot symlog reward head (now experiment 5).** A categorical distribution over symlog bins, trained with
+  DreamerV3's two-hot loss. Its expected reward is taken in original units (Σ p_i · symexp(bin_i)), not with
+  DreamerV3's squashed-space read-out (see the correction under experiment 4). This aims to keep both the
+  ordinary-step precision of experiment 4 and the full weight of rare terminal penalties.
 - **A split reward.** The normalised head on non-terminal steps, plus a raw-scale head for terminal steps,
   combined with the predicted termination probability.
 - **Analytic shaping in imagination.** Compute γΦ(s′) − Φ(s) from the motion head's predicted displacement,

@@ -78,7 +78,8 @@ Recurrent Space Model)**. The full agent is **CT-WM (Continuous-Thought World Mo
     - The normalised reward target made ordinary-step reward predictions accurate (correlation ~0.76).
   - The actor then did learn from imagination, but it exploited a biased prediction. The new reward head predicts
     almost no penalty for ending an episode, so the drone learned to fly off the map (94%).
-  - Next: a reward distribution that keeps rare penalties (DreamerV3's two-hot bins).
+  - Next (experiment 5, running): a two-hot reward distribution, trained as in DreamerV3, whose expected reward is
+    taken in original units so that rare penalties keep their weight.
   - Early training shows enormous gradients (up to ~1e9). They settle after ~600 updates.
 - No comparison so far is a fair, matched benchmark. The open problems are listed in [§9](#9-known-issues-and-open-questions).
 
@@ -845,8 +846,9 @@ The list is prioritised. "Confirmed" means shown by code or a minimal reproducti
         fly off the map (94%).
       - **Mechanism passed; behaviour failed through model exploitation.**
     - Next, on top of actor fix + motion head:
-      - a two-hot symlog reward head (DreamerV3), whose expected reward in original units keeps rare terminal
-        penalties;
+      - a two-hot symlog reward head (experiment 5, running). It is trained with DreamerV3's two-hot loss, but its
+        expected reward is taken in original units so that rare terminal penalties keep their weight. DreamerV3's
+        own read-out averages in symlog space, the averaging that erased the penalty.
       - or a split reward: a normalised non-terminal head plus a raw terminal head, weighted by the predicted
         termination probability.
       - Any claim needs ≥ 3 seeds.
