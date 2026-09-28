@@ -270,6 +270,39 @@ does not use it.
   failure. Or compute the imagined shaping from the motion head's predicted displacement, projected onto the goal
   direction.
 
+## Fourth experiment: normalised reward head (pre-registered)
+
+_Written at 17:03 CDT, before launch._
+
+**Motivation (experiment 3).** With the motion head, the latent state resolves single steps to ~1–3 m. But the
+reward head still predicts per-step rewards badly on the agent's own flights: correlation +0.32 / +0.17, RMSE
+12.5× / 19.0× the reward std. Its target is the raw reward under a unit-variance Gaussian. Non-terminal rewards
+vary by only ~0.0014, so they give it almost no gradient.
+
+**Change.** `ablation_patches` gains a `reward_norm` option (`--normalised-reward`). This is the only change.
+
+- The reward network is kept as it is: same layers, same initial weights.
+- Its target becomes `symlog((r − μ) / σ)`, under a unit-variance NLL. μ = −0.007229 and σ = 0.001387 are the
+  mean and std of the 1,018 non-terminal rewards in the same 12 prefill episodes that gave the motion scales.
+- Ordinary steps map to |target| ≤ ~1.6. Symlog keeps the rare ±1 terminal rewards representable (~±6.6) without
+  them dominating the loss (unsquashed they would be ~±700). This avoids experiment 2's learned-variance failure.
+- `mean()` returns rewards in the original units, so the team's world loss and actor objective run unchanged.
+- The change is applied on top of the actor fix and the motion head, and compared seed-for-seed with experiment 3
+  (seeds 17 and 18, 137,680 steps).
+- Pairing is verified: all initial weights are bit-identical to experiment 3, and a short run's seed-17 step-0
+  evaluation reproduces 0 / 5 / 70 / 30%.
+
+**Criteria**, compared with experiment 3 on the same seed:
+
+- **Mechanism (primary):** on the agent's own last 100 episodes, reward-prediction correlation on non-terminal
+  steps is **≥ 0.3**, with RMSE / std **≤ 3** (experiment 3: +0.32 / +0.17, 12.5× / 19.0×).
+- **Behaviour:** in the last quarter of policy episodes, final distance < 820 m **or** pickups ≥ 10%. It must also
+  be better than experiment 3 on the same seed on both. Deterministic delivery is reported as well.
+- **Guardrails:**
+  - The 15-step open-loop vector RMSE is ≤ 1.1× experiment 3's (0.435 / 0.409).
+  - The motion head's held-out 1-step error stays ≤ 11 m.
+  - The median world-model gradient norm after 1,000 updates is ≤ 70.
+
 ## Figures
 
 One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned

@@ -5,6 +5,7 @@
                              (see ablation_patches.py).
 - --delta-head W             adds W * (normalised one-step motion-change NLL) to the world-model loss
                              (see ablation_patches.py).
+- --normalised-reward        the reward head predicts symlog((r - mu) / sigma) (see ablation_patches.py).
 
 All other arguments go to the trainer unchanged. The trainer records the resolved ac_config in the run's
 manifest.json; this wrapper also writes <output>.ablation.json (the changes and this file's SHA-256) next to
@@ -23,7 +24,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import ablation_patches  # noqa: F401  (puts the DV2 folder on sys.path)
-from ablation_patches import DELTA_KEY, DV2, REWARD_STD_KEY
+from ablation_patches import DELTA_KEY, DV2, REWARD_NORM_KEY, REWARD_STD_KEY
 
 import nrsm_online_agent  # noqa: E402
 import train_nrsm_online  # noqa: E402
@@ -34,6 +35,7 @@ def main():
     parser.add_argument('--imagination-scale', type=float)
     parser.add_argument('--learned-reward-std', type=float, metavar='MIN_STD')
     parser.add_argument('--delta-head', type=float, metavar='WEIGHT')
+    parser.add_argument('--normalised-reward', action='store_true')
     known, trainer_args = parser.parse_known_args()
     default = nrsm_online_agent.ACConfig()
     config = default
@@ -49,8 +51,12 @@ def main():
         if known.delta_head <= 0:
             parser.error('--delta-head must be positive')
         changed[DELTA_KEY] = [None, known.delta_head]
-    if known.learned_reward_std is not None or known.delta_head is not None:
-        ablation_patches.apply(known.learned_reward_std, known.delta_head)
+    if known.normalised_reward:
+        if known.learned_reward_std is not None:
+            parser.error('--normalised-reward and --learned-reward-std both replace the reward head')
+        changed[REWARD_NORM_KEY] = [False, True]
+    if known.learned_reward_std is not None or known.delta_head is not None or known.normalised_reward:
+        ablation_patches.apply(known.learned_reward_std, known.delta_head, known.normalised_reward)
     if not changed:
         parser.error('Specify at least one ablation')
     base = nrsm_online_agent.OnlineAgent

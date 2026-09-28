@@ -11,6 +11,13 @@ a large error on the absolute vector does. The loss adds delta_weight * (unit-va
 the team's unchanged world-model loss. Absolute reconstruction, all other heads and the actor/critic are
 unchanged.
 
+reward_norm (experiment 4): the reward head keeps its network (same layers, same initialisation, so seed
+pairing holds) but predicts symlog((r - REWARD_MU) / REWARD_SIGMA) with a unit-variance Gaussian. The
+constants are the mean/std of non-terminal rewards in the baseline's random prefill, so ordinary steps
+become O(1) targets, while symlog keeps the rare +/-1 terminal rewards representable (~+/-6.6) without
+dominating. mean() returns the reward in original units, so the team's world loss (log_prob) and actor
+objective (mean) run unchanged.
+
 Training (run_ablation.py) and analysis scripts build agents through agent_for_run()/apply(), so a
 checkpoint is always loaded into the architecture that produced it.
 """
@@ -26,11 +33,15 @@ import tensorflow as tf  # noqa: E402
 from tensorflow.keras import layers as tfkl  # noqa: E402
 from tensorflow_probability import distributions as tfd  # noqa: E402
 
+import models  # noqa: E402
 import nrsm_online_agent  # noqa: E402
 import tools  # noqa: E402
 import validate_nrsm  # noqa: E402
 
 REWARD_STD_KEY = 'world_model.reward_head_min_std'
+REWARD_NORM_KEY = 'world_model.reward_head_normalised'
+# Mean/std of the 1,018 non-terminal rewards in the same 12 random-prefill episodes as DELTA_SCALE.
+REWARD_MU, REWARD_SIGMA = -0.007229, 0.001387
 DELTA_KEY = 'world_model.delta_head_weight'
 DELTA_DIMS = (0, 1, 2, 3, 4)   # x, y, speed, sin(heading), cos(heading) of the 13-vector
 # Std of one-step changes in the 12 random-prefill episodes (1,030 transitions) of the 2026-09-28
@@ -73,6 +84,43 @@ class MotionHead(tools.Module):
         return tfd.Independent(tfd.Normal(x, 1), 1)
 
 
+def symlog(x):
+    return tf.sign(x) * tf.math.log1p(tf.abs(x))
+
+
+def symexp(x):
+    return tf.sign(x) * tf.math.expm1(tf.abs(x))
+
+
+class NormalisedReward:
+    """Minimal distribution interface used by the team's code: log_prob() for the world loss, mean() for
+    imagination and evaluation. The Gaussian lives in the transformed space."""
+
+    def __init__(self, prediction):
+        self.prediction = prediction
+
+    def log_prob(self, reward):
+        target = symlog((tf.cast(reward, tf.float32) - REWARD_MU) / REWARD_SIGMA)
+        return tfd.Normal(self.prediction, 1.).log_prob(target)
+
+    def mean(self):
+        return REWARD_MU + REWARD_SIGMA * symexp(self.prediction)
+
+    mode = mean
+
+
+class NormalisedRewardHead(tools.Module):
+    """The team's reward network (models.DenseHead, identical layers and initialisation) with a normalised,
+    symlog-transformed target."""
+
+    def __init__(self, units, layers=2):
+        super().__init__()
+        self.net = models.DenseHead((), layers=layers, units=units)
+
+    def __call__(self, features):
+        return NormalisedReward(self.net(features).mean())
+
+
 def delta_targets(vector):
     """Normalised one-step changes [B, T-1, 5] of the motion coordinates."""
     dims = list(DELTA_DIMS)
@@ -85,9 +133,11 @@ def delta_mask(data):
     return data['valid'][:, 1:] * (1. - data['is_first'][:, 1:]) * data['valid'][:, :-1]
 
 
-def world_model_class(learned_reward_std=None, delta_weight=None):
+def world_model_class(learned_reward_std=None, delta_weight=None, reward_norm=False):
     base = validate_nrsm.DiagnosticWorldModel
-    if not learned_reward_std and not delta_weight:
+    if learned_reward_std and reward_norm:
+        raise ValueError('learned_reward_std and reward_norm both replace the reward head')
+    if not learned_reward_std and not delta_weight and not reward_norm:
         return base
 
     class AblationWorldModel(base):
@@ -96,6 +146,8 @@ def world_model_class(learned_reward_std=None, delta_weight=None):
             if learned_reward_std:
                 # Replacing the attribute keeps its position, so variable order stays deterministic.
                 self.reward = LearnedStdHead(layers=2, units=config.hidden, min_std=learned_reward_std)
+            if reward_norm:
+                self.reward = NormalisedRewardHead(units=config.hidden)
             if delta_weight:
                 self.delta_weight = float(delta_weight)
                 self.delta = MotionHead(len(DELTA_DIMS), layers=2, units=config.hidden)
@@ -117,9 +169,9 @@ def _world_loss_with_delta(self, data):
     return post, loss, dict(metrics, model_loss=loss, delta_nll=delta_nll)
 
 
-def apply(learned_reward_std=None, delta_weight=None):
+def apply(learned_reward_std=None, delta_weight=None, reward_norm=False):
     """Every OnlineAgent built after this call uses the selected world model and loss."""
-    nrsm_online_agent.DiagnosticWorldModel = world_model_class(learned_reward_std, delta_weight)
+    nrsm_online_agent.DiagnosticWorldModel = world_model_class(learned_reward_std, delta_weight, reward_norm)
     nrsm_online_agent.OnlineAgent.world_loss = (
         _world_loss_with_delta if delta_weight else _ORIGINAL_WORLD_LOSS)
 
@@ -133,5 +185,6 @@ def agent_for_run(run_dir):
     """Rebuild a run's exact agent (architecture, loss and ac_config) from its manifest and sidecar."""
     manifest = json.loads((Path(run_dir) / 'manifest.json').read_text())
     changes = run_changes(run_dir)
-    apply(changes.get(REWARD_STD_KEY, [None, None])[1], changes.get(DELTA_KEY, [None, None])[1])
+    apply(changes.get(REWARD_STD_KEY, [None, None])[1], changes.get(DELTA_KEY, [None, None])[1],
+          bool(changes.get(REWARD_NORM_KEY, [False, False])[1]))
     return nrsm_online_agent.OnlineAgent(ac_config=nrsm_online_agent.ACConfig(**manifest['ac_config']))
