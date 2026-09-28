@@ -170,6 +170,42 @@ episodes:
   persistence (`STAGE1_RESULTS_20260910.md` §4). This looks like a shared world-model bottleneck, not something
   specific to CTM.
 
+## Third experiment: one-step motion head (pre-registered)
+
+_Written at 15:05 CDT, before launch._
+
+**Motivation (experiments 1–2).** The world model's 1-step position error is ~210–230 m, but the drone moves ~22 m
+per step. So the latent state cannot resolve what a single action changes, and neither can any reward head built on
+it. The absolute-vector loss (unit-variance Gaussian on the normalised vector) barely distinguishes 20 m from 200 m.
+
+**Change.** `ablation_patches` gains a `delta_weight` option (`--delta-head 1.0`). This is the only change.
+
+- An auxiliary head predicts the one-step change of x, y, speed and sin/cos heading from the same posterior
+  features as the other heads.
+- Targets are divided by fixed per-dimension scales: the std of one-step changes in the baseline's 12
+  random-prefill episodes, which is 7.5 m for x and 7.3 m for y. The targets are clipped at ±10.
+- The loss becomes the team's unchanged world-model loss plus 1.0 × the head's unit-variance NLL. Absolute
+  reconstruction and all other heads stay as they are.
+- Phase and goal offsets are excluded, because they jump at pickup. Elapsed time is excluded because it is constant.
+- Why this should help: the latent state must now encode motion at metre scale, which is the information per-step
+  rewards depend on.
+- The change is applied on top of the actor fix and compared seed-for-seed with the actor-fix runs (seeds 17 and
+  18, 137,680 steps).
+
+**Criteria**, compared with the actor-fix run of the same seed:
+
+- **Mechanism A (primary):** on the 8 held-out episodes, the median error of the motion head's 1-step
+  position-change prediction from *prior* features is **≤ 11 m**, half the median step. The report also gives a
+  constant-velocity baseline.
+- **Mechanism B:** on the agent's own last 100 episodes, reward-prediction correlation on non-terminal steps is
+  **≥ 0.3**, with RMSE / std ≤ 3.
+- **Behaviour:** in the last quarter of policy episodes, final distance < 820 m **or** pickups ≥ 10%. It must also
+  be better than the actor fix of the same seed on both measures.
+- **Guardrails:**
+  - The 15-step open-loop vector RMSE is ≤ 1.1× the actor fix's.
+  - The median world-model gradient norm after 1,000 updates is ≤ 70 (about 3× the baseline's 23). Experiment 2
+    failed through clipping domination, and this guardrail catches that.
+
 ## Figures
 
 One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned
