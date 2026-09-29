@@ -68,7 +68,7 @@ Recurrent Space Model)**. The full agent is **CT-WM (Continuous-Thought World Mo
   - CT-WM runs end to end and its CTM core is numerically faithful to the official code.
   - In a 1-hour run (137k steps), its **world model learned** to roughly match a "nothing changes" guess at 5–15
     steps ahead. Its **actor did not learn at all**: it stayed a random policy with 0% deliveries.
-  - Seven follow-up experiments did not change that (0% delivery in all of them):
+  - Seven follow-up experiments on the world model and the reward did not change that (0% delivery in all of them):
     - a stronger actor signal;
     - a learned-variance reward head;
     - a one-step motion head;
@@ -76,6 +76,13 @@ Recurrent Space Model)**. The full agent is **CT-WM (Continuous-Thought World Mo
     - a two-hot reward head;
     - an edge-distance head;
     - a 16× larger random latent state (a one-seed pilot).
+  - **What finally worked: DreamerV2's learning signal.** The team chose to test it (experiment 8): the 64 controller
+    demonstrations plus the behaviour-cloning ("copy the expert") term.
+    - CT-WM then picks up the package in 38–54% of fresh test scenes and delivers in 6–10%. These are its first
+      deliveries.
+    - In late training it picks up 28–43% of the time and makes ~500 m of progress toward the goal per episode.
+    - It was still improving when training ended. It remains below DreamerV2's best (16–39% delivered on fixed
+      scenes) and far below the controller.
   - Three real problems were fixed along the way:
     - The motion head cut the world model's step-to-step position error from ~200 m to ~1–3 m.
     - The normalised reward target made ordinary-step reward predictions accurate (correlation ~0.76).
@@ -91,9 +98,8 @@ Recurrent Space Model)**. The full agent is **CT-WM (Continuous-Thought World Mo
       model is still 30–60 m off.
     - A 16× larger random latent state (32 × 32 instead of 8 × 8) halved the error again, to ~30 m. Crashes were
       still not foreseen, since drones leave the map within ~3 m of the edge.
-  - Open question for the team: CT-WM trains without the 64 demonstrations and behaviour-cloning term that
-    DreamerV2's delivering runs use. Adding them, or running many longer seeds on the GPU cluster, are the two
-    candidate next steps.
+  - Next: longer runs of the demonstration setup with ≥ 3 seeds (a good first job for the GPU cluster), and tests of
+    which of its parts matters.
   - Early training shows enormous gradients (up to ~1e9). They settle after ~600 updates.
 - No comparison so far is a fair, matched benchmark. The open problems are listed in [§9](#9-known-issues-and-open-questions).
 
@@ -794,7 +800,7 @@ Details, commands and the small result files are in [`reports/2026-09-28_first_r
 | **CT-WM online, 1 hour, seed 17** (the team's 1-hour protocol, defaults unchanged) | **137,680 env steps and 27,380 updates** (the team's GPU managed 8,400 steps in 1 h, so ~16× faster). **0% delivery** on fixed and fresh scenes. The actor stayed statistically random for all 1,540 policy episodes |
 | CT-WM world model at all 13 checkpoints (the 8 held-out episodes of the offline check) | 1-step open-loop RMSE 1.05 → 0.24 (persistence 0.11); 15-step 1.03 → 0.44 (persistence 0.45). **Matches "nothing changes" at 15 steps and is still improving** |
 | World-model gradient norm (online run) | ~8e5 at the start, below the clip (100) from update ~630, then a median of 23. **The explosion is an early transient** |
-| **Ablations** (13 runs, each 137,680 steps; [`reports/2026-09-28_ctwm_actor_ablation/`](reports/2026-09-28_ctwm_actor_ablation/README.md)) | `imagination_scale` 1.0: actor gradients ~3× larger, behaviour still random. + learned-variance reward head: hurt the world model. + one-step motion head: **motion error 1–3 m (was ~200 m)**, reward correlation only +0.17 to +0.32. + normalised reward target: **reward correlation +0.75 to +0.78**, and the actor responds (speed ×1.7), but it flies off the map in 94% of episodes. Normalised target + two-hot reward head instead: **out of bounds 18–34%**, and seed 17's drones end 70 ± 13 m closer to their goal than they started, a first. + edge-distance head: position error roughly halved, out-of-bounds endings 2.5× more foreseeable, behaviour unchanged. + 32 × 32 stochastic state (one-seed pilot, 85 min on the M4): position error halved again, endings no more foreseeable, behaviour unchanged. **0% delivery in every run** |
+| **Ablations** (15 runs, each 137,680 steps; [`reports/2026-09-28_ctwm_actor_ablation/`](reports/2026-09-28_ctwm_actor_ablation/README.md)) | `imagination_scale` 1.0: actor gradients ~3× larger, behaviour still random. + learned-variance reward head: hurt the world model. + one-step motion head: **motion error 1–3 m (was ~200 m)**, reward correlation only +0.17 to +0.32. + normalised reward target: **reward correlation +0.75 to +0.78**, and the actor responds (speed ×1.7), but it flies off the map in 94% of episodes. Normalised target + two-hot reward head instead: **out of bounds 18–34%**, and seed 17's drones end 70 ± 13 m closer to their goal than they started, a first. + edge-distance head: position error roughly halved, out-of-bounds endings 2.5× more foreseeable, behaviour unchanged. + 32 × 32 stochastic state (one-seed pilot, 85 min on the M4): position error halved again, endings no more foreseeable, behaviour unchanged. **0% delivery in all of these.** Edge-head setup + DreamerV2's 64 demonstrations and 5× behaviour cloning: **pickups 38–54% and deliveries 6–10% of fresh scenes**, the first CT-WM deliveries |
 | Why the actor exploited the model (normalised target) | The discount head expected endings near the edge, but the symlog-Gaussian reward head charged almost nothing for them: −0.02 predicted for ending steps whose actual reward is −0.68. Averaging in symlog space erases the rare penalty, so leaving the map looked like a free exit that saved the remaining step costs |
 | What the two-hot head fixes, and what it does not | Its expected reward, taken in original units, charges each foreseen ending its probability-weighted penalty, in agreement with the discount head. Its ordinary-step part is the most accurate so far (correlation +0.93 / +0.96). But no world model so far foresees out-of-bounds endings (2–10% of the penalty predicted): motion is known to 1–3 m, while absolute position is off by ~200–380 m |
 | What the edge-distance head changes | Near the edges, the latent's position error falls from ~130 m to 42–74 m (one step ahead) and 30–60 m (just after an observation). The predicted chance of ending at held-out out-of-bounds endings rises from 0.04–0.05 to 0.09–0.14; the bar was 0.5. Its loss plateaus by ~50k steps. A 32 × 32 stochastic state (pilot) brings the error to ~26–32 m, but the ending probability stays at 0.07, far from the bar |
@@ -884,11 +890,22 @@ The list is prioritised. "Confirmed" means shown by code or a minimal reproducti
       - the near-edge position error halves again, to ~26–32 m;
       - the held-out ending probability stays at 0.07, and behaviour is unchanged;
       - the 15-step guardrail was narrowly missed.
-    - Next (a team decision): either give CT-WM DreamerV2's 64 demonstrations and behaviour-cloning term, which the
-      `no_bc` contract excludes, or keep pure RL and run ≥ 3 longer seeds per condition on the GPU cluster.
-12. **No matched comparison yet:** CT-WM differs from our DreamerV2 in actor input (latent vs. exact), use of
-    demonstrations (none vs. 64), batch size (2 × 101 vs. 50 × 20) and model size. A fair comparison must match these
-    or ablate them.
+    - DreamerV2's learning signal on top of the edge-head setup (the team's choice):
+      - 64 controller demonstrations in world-model training;
+      - a 5× behaviour-cloning actor term;
+      - imagination scale 0.1.
+    - Results:
+      - pickups 28–43% in late training, 38–54% on fresh test scenes;
+      - deliveries 6–10% on fresh scenes, the first for CT-WM;
+      - +500 m of progress per episode.
+      - Imitation (0.96–0.97 balanced agreement) and all guardrails pass. **The primary delivery bar (≥ 10%) passes
+        on one seed of two.**
+    - Next:
+      - longer runs with ≥ 3 seeds on the GPU cluster (performance was still rising);
+      - ablations separating the three parts, including an imitation-only control.
+12. **No matched comparison yet:** CT-WM differs from our DreamerV2 in actor input (latent vs. exact), batch size
+    (2 × 101 vs. 50 × 20) and model size. Demonstrations used to differ too (none vs. 64); experiment 8 closes that
+    gap for one configuration. A fair comparison must match the rest or ablate them.
 13. **The memory question** ([§4](#4-what-we-are-trying-to-show)): the current task is fully observable, so we need a
     partially observable or longer-horizon variant.
 

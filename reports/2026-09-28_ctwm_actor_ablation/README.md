@@ -842,43 +842,118 @@ Baselines at experiment 6's final checkpoints (seed 17 / seed 18):
   - The motion head's held-out 1-step error stays ≤ 11 m.
   - The median world-model gradient norm after 1,000 updates is ≤ 70.
 
+## Results: experiment 8, DreamerV2's demonstrations and behaviour cloning
+
+Both runs completed exactly 137,680 steps (~92 min each, two in parallel), and checkpoint restore was verified.
+Their step-0 evaluations reproduced experiment 6 exactly.
+
+**Verdict against the pre-registered criteria:**
+
+| Criterion | Seed 17 | Seed 18 | Verdict |
+|---|---:|---:|---|
+| **Behaviour A (primary):** deterministic delivery on the 50 fresh scenes ≥ 10% (every earlier run: 0%) | 6% (3 / 50) | **10% (5 / 50)** | ❌ Met on seed 18 only |
+| **Behaviour B:** Q4 pickups ≥ 10% or final distance < 820 m, and better than exp 6 on both | **28%, 455 m** | **43%, 427 m** | ✅ Pass |
+| **Mechanism A:** predicted reward at the demonstrations' deliveries ≥ 50% (exp 6: −2% / −6%) | 48% | **65%** | ❌ Met on seed 18 only |
+| **Mechanism B:** balanced MOVE/TURN agreement ≥ 0.8 (exp 6: 0.44 / 0.59) | **0.96** | **0.97** | ✅ Pass |
+| **Guardrail:** 15-step open-loop RMSE ≤ 1.1× exp 6 (0.398 / 0.454) | 0.343 | 0.358 | ✅ Pass (lower than exp 6) |
+| **Guardrail:** motion head ≤ 11 m; median world-model gradient ≤ 70 | 1.9 m, 25.5 | 2.1 m, 26.4 | ✅ Pass |
+
+**This is the first CT-WM configuration that delivers.**
+- **Deterministic evaluations:** 12 and 15 deliveries across all its evaluations; every earlier run had 0.
+- **Final evaluation:** 3 / 50 and 5 / 50 fresh scenes, and 1 / 20 fixed scenes per seed.
+- **Training:** 21 and 39 deliveries. Every earlier run had at most one, by chance.
+
+| Last quarter of policy episodes | Exp 6, seed 17 | Exp 8, seed 17 | Exp 6, seed 18 | Exp 8, seed 18 |
+|---|---:|---:|---:|---:|
+| Pickups | 1.9% | **28.2%** | 1.5% | **42.8%** |
+| Deliveries | 0% | 3.7% | 0% | 6.1% |
+| Final distance to active goal | 924 m | **455 m** | 932 m | **427 m** |
+| Net progress toward the goal (`progress_check.py`) | +33 m | **+510 m** | 0 m | **+504 m** |
+| Out of bounds | 40% | 22% | 27% | 12% |
+| Mean speed | 8.1 m/step | 17.1 m/step | 6.0 m/step | 17.1 m/step |
+| Deterministic, fresh scenes: delivery / pickup / out of bounds | 0 / 6 / 70% | 6 / 38 / 16% | 0 / 2 / 14% | 10 / 54 / 4% |
+
+- **Still improving at the end.**
+  - Pickups by quarter: 6 → 11 → 21 → 28% (seed 17) and 7 → 11 → 24 → 43% (seed 18).
+  - Out-of-bounds endings fell from 58–68% to 12–22%. Deliveries appear from ~100k steps on.
+- **The actor learned the demonstrations early.** Its cloning loss was 0.30–0.38 in the first 20k steps and
+  0.07–0.08 at the end, yet pickups kept rising for the whole run.
+- **The world model now knows what a delivery is.** At the demonstrations' deliveries it predicts 48% / 65% of the
+  +1 reward, with ending probability 0.43 / 0.70 (experiment 6: −2% / −6%, 0.01 / 0.03).
+- **The actor imitates the controller** on demonstrated states: balanced agreement 0.96 / 0.97, parameter error
+  0.09 / 0.10 (experiment 6: 0.44 / 0.59 and 0.76 / 0.78).
+- **Out-of-bounds endings are still hardly foreseen:** the held-out ending probability is 0.19 / 0.06.
+
+**Interpretation.**
+- The missing learning signal was the main obstacle. With DreamerV2's demonstrations and cloning, CT-WM's
+  latent-input actor learns to fly to the pickup point, and sometimes on to the delivery point.
+- It is still far from the controller (100%) and from DreamerV2's best runs (16–39% of fixed scenes; CT-WM here:
+  5%). Those runs also use:
+  - a cloning warm start and event-prioritised replay;
+  - the exact observation vector as actor input;
+  - batches of 50 × 20 steps instead of 2 × 101, and a larger model.
+- Imitation on the demonstration states is near perfect (0.96–0.97), yet new scenes deliver only 6–10%. A plausible
+  reason: small deviations compound into states the 64 demonstrations do not cover.
+- The change has three parts, pre-registered as one unit: demonstrations in world-model training, the cloning term,
+  and imagination scale 0.1. These runs do not separate them, nor how much reinforcement learning still adds.
+- Two seeds only.
+
+**Next steps (not run).**
+- **Longer runs with ≥ 3 seeds.** Performance was still rising at the end. This is the natural first job for the GPU
+  cluster.
+- **Separate the parts:**
+  - cloning without demonstrations in world-model training;
+  - demonstrations in the world model without cloning;
+  - an imitation-only control (imagination scale 0), to measure what reinforcement learning adds.
+- **Close the rest of the gap to DreamerV2's recipe:** its 3,000-update cloning warm start and its event-prioritised
+  replay.
+
 ## Figures
 
 One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned
 reward std, yellow = actor fix + motion head, pink = actor fix + motion head + normalised reward, green = actor fix +
-motion head + two-hot reward, violet = the same + edge head, red = the same + 32 × 32 stochastic state (seed 17
-only). Seed 18 has no baseline run.
+motion head + two-hot reward, violet = the same + edge head, red = the same + DreamerV2's demonstrations and
+behaviour cloning. The one-seed 32 × 32 pilot is left out (the palette has eight validated colours); its numbers are
+in its tables. Seed 18 has no baseline run.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="final_distance_to_goal_dark.png">
-  <img alt="Two-panel line chart (seeds 17 and 18) of the rolling mean distance to the active goal at the end of training episodes, for eight conditions. The baseline, actor-fix, reward-std and motion-head runs stay between about 860 and 1,210 m; the normalised-reward runs drift higher, up to about 1,270 to 1,410 m. The two-hot runs dip lowest, to about 710 m (seed 17) and 780 m (seed 18) around 85,000 steps, and end near 850 and 945 m. The edge-head runs dip to about 750 m (seed 17, near 82,000 steps) and 810 m (seed 18, near the end). The 32 × 32 run (seed 17 only) stays between about 870 and 1,140 m. Only the two-hot and edge-head conditions cross below the 820 m threshold, briefly." src="final_distance_to_goal_light.png">
+  <img alt="Two-panel line chart (seeds 17 and 18) of the rolling mean distance to the active goal at the end of training episodes, for eight conditions. The baseline, actor-fix, reward-std and motion-head runs stay between about 860 and 1,210 m; the normalised-reward runs drift higher, up to about 1,270 to 1,410 m. The two-hot runs dip lowest, to about 710 m (seed 17) and 780 m (seed 18) around 85,000 steps, and end near 850 and 945 m. The edge-head runs dip to about 750 m (seed 17, near 82,000 steps) and 810 m (seed 18, near the end). The demonstration runs fall steadily from about 1,180 m to about 450 m (seed 17) and 410 m (seed 18) and stay below the 820 m threshold for the second half of training." src="final_distance_to_goal_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="training_pickup_rate_dark.png">
-  <img alt="Two-panel line chart of the rolling pickup rate in training episodes for eight conditions. Every condition fluctuates between 0% and at most 9% with no sustained upward trend; the pre-registered threshold was 10%." src="training_pickup_rate_light.png">
+  <img alt="Two-panel line chart of the rolling pickup rate in training episodes for eight conditions. Seven conditions fluctuate between 0% and at most 9%. The demonstration runs climb far above the 10% threshold: to a peak of 38% (seed 17, near 102,000 steps; 23% at the end) and 49% (seed 18, near 129,000 steps; 44% at the end)." src="training_pickup_rate_light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="training_delivery_rate_dark.png">
+  <img alt="Two-panel line chart of the rolling delivery rate in training episodes for eight conditions. Every condition except the demonstration runs stays at 0%, apart from single chance deliveries of 1% in a rolling window. The demonstration runs rise after about 100,000 steps to about 5% (seed 17) and 6 to 9% (seed 18)." src="training_delivery_rate_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="training_oob_rate_dark.png">
-  <img alt="Two-panel line chart of the rolling out-of-bounds rate in training episodes for eight conditions. The normalised-reward runs climb to about 95 to 100% after roughly 40,000 (seed 17) and 50,000 (seed 18) environment steps and stay there. The two-hot runs peak at 60% (seed 17, near 57,000 steps) and 74% (seed 18, near 40,000), then fall back and end near 17% and 31%. The edge-head runs swing between about 7% and 68% and end near 56% (seed 17) and 14% (seed 18). The 32 × 32 run (seed 17 only) peaks at 58% near 57,000 steps and ends near 27%. The other runs stay between about 15% and 70%." src="training_oob_rate_light.png">
+  <img alt="Two-panel line chart of the rolling out-of-bounds rate in training episodes for eight conditions. The normalised-reward runs climb to about 95 to 100% after roughly 40,000 (seed 17) and 50,000 (seed 18) environment steps and stay there. The two-hot runs peak at 60% (seed 17, near 57,000 steps) and 74% (seed 18, near 40,000), then fall back and end near 17% and 31%. The edge-head runs swing between about 7% and 68% and end near 56% (seed 17) and 14% (seed 18). The demonstration runs start high (up to 73 to 79%) and fall to about 24% (seed 17) and 14% (seed 18). The other runs stay between about 15% and 70%." src="training_oob_rate_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="world_model_15step_dark.png">
-  <img alt="Two-panel log-scale line chart of the world model's 15-step open-loop error divided by the persistence error. The baseline, actor-fix, motion-head, normalised-reward, two-hot, edge-head and 32 x 32 runs fall from about x2.2 to about x0.85 to x1.02; the learned-reward-std runs plateau around x1.25 to x1.5." src="world_model_15step_light.png">
+  <img alt="Two-panel log-scale line chart of the world model's 15-step open-loop error divided by the persistence error. The baseline, actor-fix, motion-head, normalised-reward, two-hot and edge-head runs fall from about x2.2 to about x0.85 to x1.02; the demonstration runs end lowest, near x0.77 to x0.80; the learned-reward-std runs plateau around x1.25 to x1.5." src="world_model_15step_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="actor_gradient_norm_dark.png">
-  <img alt="Two-panel log-scale line chart of the actor gradient norm over actor-critic updates. The baseline's median is about 0.012; the actor-fix and motion-head runs sit about 3 times higher (medians 0.034 to 0.039); the reward-std and normalised-reward runs sit about 1.6 to 2 times higher (medians about 0.02 to 0.026); the two-hot runs are highest (medians 0.047 and 0.055), and the edge-head runs are close to them (0.041 and 0.031); the 32 x 32 run's median is 0.029." src="actor_gradient_norm_light.png">
+  <img alt="Two-panel log-scale line chart of the actor gradient norm over actor-critic updates. The baseline's median is about 0.012; the actor-fix and motion-head runs sit about 3 times higher (medians 0.034 to 0.039); the reward-std and normalised-reward runs sit about 1.6 to 2 times higher (medians about 0.02 to 0.026); the two-hot runs are highest (medians 0.047 and 0.055), and the edge-head runs are close to them (0.041 and 0.031). The demonstration runs sit about 100 times higher still (medians 4.6 and 4.9), because the behaviour-cloning term dominates their actor loss; they stay far below the clip of 100." src="actor_gradient_norm_light.png">
 </picture>
 
 ## Overall conclusions
 
-1. **No change so far makes the CT-WM actor deliver within 137,680 steps.** All fourteen runs end at 0% delivery:
-   baseline, 2 × actor fix, 2 × + reward std, 2 × + motion head, 2 × + normalised reward, 2 × + two-hot reward,
-   2 × + edge head, 1 × + 32 × 32 stochastic state.
+1. **Only DreamerV2's demonstrations and behaviour cloning make the CT-WM actor deliver within 137,680 steps.**
+   - The other fourteen runs deliver in 0% of evaluation scenes: baseline, 2 × actor fix, 2 × + reward std,
+     2 × + motion head, 2 × + normalised reward, 2 × + two-hot reward, 2 × + edge head, 1 × + 32 × 32 stochastic
+     state.
+   - With demonstrations and cloning, the drone delivers in 6% and 10% of fresh scenes and picks up in 38% and 54%
+     (experiment 8).
 2. **The imagination-scale hypothesis is rejected as the sole cause.** Up-weighting the RL term increases actor
    gradients ~3× but amplifies an uninformative signal (with slightly more out-of-bounds endings).
 3. **The learned reward-std head, in this form, is rejected and harmful.** It does not improve reward prediction,
@@ -919,21 +994,27 @@ only). Seed 18 has no baseline run.
     - The held-out ending probability is 0.068 (experiment 6: 0.088), and behaviour is unchanged.
     - Precision gains of this size do not make out-of-bounds endings foreseeable. Since experiment 5 there is no
       exploit left to fix.
+11. **The missing ingredient was the learning signal.**
+    - DreamerV2's 64 demonstrations and cloning term (experiment 8) turn CT-WM into a navigating agent: pickups
+      28–43% in late training, +500 m of progress per episode, and the first deliveries in evaluation.
+    - The world model learns what a delivery is, and the actor imitates the controller almost perfectly on
+      demonstrated states.
+    - It is still far below the controller and DreamerV2's best runs, and still improving when training ended.
+    - Pre-registered: behaviour B, imitation and all guardrails pass; the primary delivery bar and the
+      delivery-reward check pass on one seed of two.
 
-**Suggested next steps** (not run; these need a team decision):
+**Suggested next steps** (not run):
 
-- **Give CT-WM DreamerV2's learning signal:** the 64 demonstrations and the behaviour-cloning term that
-  DreamerV2's delivering runs use, and that the CT-WM contract (`no_bc`) excludes. This targets the sparse-reward
-  problem directly.
-- **Or keep the pure-RL contract, and run longer:** ≥ 3 seeds per condition on the GPU cluster, to see whether the
-  small goal-directed progress of experiments 5–6 grows into pickups.
-- **Analytic shaping in imagination.** Compute γΦ(s′) − Φ(s) from the motion head's predicted displacement,
-  projected onto the goal direction.
-- **Analytic shaping in imagination.** Compute γΦ(s′) − Φ(s) from the motion head's predicted displacement,
-  projected onto the goal direction.
+- **Longer runs of experiment 8's configuration, with ≥ 3 seeds per condition.** Performance was still rising at the
+  end; this is the natural first job for the GPU cluster.
+- **Separate the three parts of experiment 8:**
+  - cloning without demonstrations in world-model training;
+  - demonstrations in the world model without cloning;
+  - an imitation-only control (imagination scale 0), to measure what reinforcement learning adds.
+- **Close the rest of the gap to DreamerV2's recipe:** its cloning warm start and its event-prioritised replay.
 - **Criteria for distributional reward heads** should score ending pricing (the slope above) and foreseeing
   endings separately, and score ordinary steps on the no-ending prediction.
-- Any positive result needs ≥ 3 seeds per condition. Seed 18 in these experiments has no baseline control.
+- Seed 18 in these experiments has no baseline control.
 
 ## Files in this folder
 
@@ -941,11 +1022,11 @@ only). Seed 18 has no baseline run.
 |---|---|
 | `run_ablation.py`, `ablation_patches.py` | Wrapper and runtime patches (the team's code is not modified) |
 | `*_ablation.json` | Per-run record of the changes and the wrapper/patch SHA-256 |
-| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*`, `imagscale1_delta_seed{17,18}_*`, `imagscale1_delta_rewardnorm_seed{17,18}_*`, `imagscale1_delta_twohot_seed{17,18}_*`, `imagscale1_delta_twohot_edge_seed{17,18}_*`, `imagscale1_delta_twohot_edge_latent32_seed17_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, motion check, terminal-reward check (experiments 3–7), ending check and edge check (experiments 3–7), `result.json`, `manifest.json` |
-| `*_ending_timeline.json` | The ending check at every checkpoint (experiments 3–7) |
+| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*`, `imagscale1_delta_seed{17,18}_*`, `imagscale1_delta_rewardnorm_seed{17,18}_*`, `imagscale1_delta_twohot_seed{17,18}_*`, `imagscale1_delta_twohot_edge_seed{17,18}_*`, `imagscale1_delta_twohot_edge_latent32_seed17_*`, `imagscale01_delta_twohot_edge_demo_seed{17,18}_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, motion check, terminal-reward check (experiments 3–8), ending check and edge check (experiments 3–8), demonstration check (experiments 6 and 8), `result.json`, `manifest.json` |
+| `*_ending_timeline.json` | The ending check at every checkpoint (experiments 3–8) |
 | `progress_check.json` | Net progress toward the goal, all runs |
 | `baseline_reward_signal.json`, `baseline_delta_check.json` | Reward and motion checks on the first report's final checkpoint |
-| `sweep_world_model.py`, `reward_signal_check.py`, `delta_check.py`, `terminal_reward_check.py`, `ending_check.py`, `progress_check.py`, `edge_check.py`, `make_figures.py` | Analysis scripts (reproduce the files and figures) |
+| `sweep_world_model.py`, `reward_signal_check.py`, `delta_check.py`, `terminal_reward_check.py`, `ending_check.py`, `progress_check.py`, `edge_check.py`, `demo_check.py`, `make_figures.py` | Analysis scripts (reproduce the files and figures) |
 | `*_light.png`, `*_dark.png` | Comparison figures |
 
 The git history records which script revision each set of runs used:
@@ -956,4 +1037,5 @@ The git history records which script revision each set of runs used:
 - normalised-reward runs: wrapper and patches `f032152`;
 - two-hot runs: wrapper and patches `eebe243`;
 - edge-head runs: wrapper and patches `2af097e`;
-- 32 × 32 pilot: wrapper and patches `5307c98`.
+- 32 × 32 pilot: wrapper and patches `5307c98`;
+- demonstration runs: wrapper and patches `47782b7`.

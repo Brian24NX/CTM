@@ -362,5 +362,57 @@
       "progress_m": -82.03987767146184,
       "progress_se_m": 21.181200439700113
     }
+  },
+  "imagscale01_delta_twohot_edge_demo_seed17": {
+    "policy_episodes": 1707,
+    "last_quarter": {
+      "episodes": 429,
+      "start_m": 965.5018339001493,
+      "end_m": 455.10634392513816,
+      "progress_m": 510.3954899750112,
+      "progress_se_m": 24.02914332597457
+    },
+    "timeout_share": 0.7412587412587412,
+    "oob_share": 0.22144522144522144,
+    "timeout": {
+      "episodes": 318,
+      "start_m": 974.4285565742157,
+      "end_m": 439.1254789004536,
+      "progress_m": 535.3030776737621,
+      "progress_se_m": 28.0502881283543
+    },
+    "oob": {
+      "episodes": 95,
+      "start_m": 982.4322299354955,
+      "end_m": 570.3950849031147,
+      "progress_m": 412.03714503238075,
+      "progress_se_m": 51.607759415271445
+    }
+  },
+  "imagscale01_delta_twohot_edge_demo_seed18": {
+    "policy_episodes": 1703,
+    "last_quarter": {
+      "episodes": 428,
+      "start_m": 931.2605316661229,
+      "end_m": 427.0302794625826,
+      "progress_m": 504.23025220354026,
+      "progress_se_m": 24.083435042373726
+    },
+    "timeout_share": 0.8200934579439252,
+    "oob_share": 0.1191588785046729,
+    "timeout": {
+      "episodes": 351,
+      "start_m": 948.6650670586828,
+      "end_m": 431.00072335789343,
+      "progress_m": 517.6643437007893,
+      "progress_se_m": 27.555512543606397
+    },
+    "oob": {
+      "episodes": 51,
+      "start_m": 964.4520269655713,
+      "end_m": 571.1532333972407,
+      "progress_m": 393.29879356833067,
+      "progress_se_m": 58.57778061120366
+    }
   }
 }

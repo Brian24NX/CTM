@@ -5,8 +5,9 @@ runs whose files do not exist yet are skipped. Usage (any Python with numpy + ma
     python make_figures.py
 Colour follows the condition (validated palette, slots 1-8): baseline, actor fix, actor fix + learned reward
 std, actor fix + motion head, actor fix + motion head + normalised reward, actor fix + motion head + two-hot
-reward, the same + edge head, the same + a 32 x 32 stochastic state (seed 17 only). Lines carry direct end labels
-where they do not collide; the legend and the README tables carry the rest.
+reward, the same + edge head, the same + DreamerV2's demonstrations and behaviour cloning. (The one-seed 32 x 32
+pilot is left out; the palette has 8 validated slots, and its numbers are in the README tables.) Lines carry direct
+end labels where they do not collide; the legend and the README tables carry the rest.
 """
 import csv
 import json
@@ -29,9 +30,9 @@ THEMES = {
 CONDITIONS = ['Baseline (scale 0.1)', 'Actor fix (scale 1.0)', 'Actor fix + learned reward std',
               'Actor fix + motion head', 'Actor fix + motion head + normalised reward',
               'Actor fix + motion head + two-hot reward', 'Actor fix + motion head + two-hot + edge head',
-              'Edge-head setup + 32 × 32 latent (seed 17)']
+              'Edge-head setup + demonstrations + BC']
 SHORT = ['Baseline', 'Actor fix', '+ reward std', '+ motion head', '+ reward norm', '+ two-hot', '+ edge head',
-         '+ 32 × 32']
+         '+ demos + BC']
 RUNS = [  # (condition index, seed, folder, file prefix)
     (0, 17, BASE, 'ctwm_online_1h'),
     (1, 17, HERE, 'imagscale1_seed17'), (1, 18, HERE, 'imagscale1_seed18'),
@@ -40,7 +41,7 @@ RUNS = [  # (condition index, seed, folder, file prefix)
     (4, 17, HERE, 'imagscale1_delta_rewardnorm_seed17'), (4, 18, HERE, 'imagscale1_delta_rewardnorm_seed18'),
     (5, 17, HERE, 'imagscale1_delta_twohot_seed17'), (5, 18, HERE, 'imagscale1_delta_twohot_seed18'),
     (6, 17, HERE, 'imagscale1_delta_twohot_edge_seed17'), (6, 18, HERE, 'imagscale1_delta_twohot_edge_seed18'),
-    (7, 17, HERE, 'imagscale1_delta_twohot_edge_latent32_seed17'),
+    (7, 17, HERE, 'imagscale01_delta_twohot_edge_demo_seed17'), (7, 18, HERE, 'imagscale01_delta_twohot_edge_demo_seed18'),
 ]
 SEEDS = (17, 18)
 WINDOW = 100

@@ -202,7 +202,7 @@ Files: `ctwm_online_1h_{result,manifest}.json`, `ctwm_online_1h_evaluations.json
    It is still worth checking whether they harm the early representation.
 5. The world model reaches parity with the persistence baseline at 5–15 steps within an hour. **It still has to beat
    it clearly** before imagination can be trusted for planning.
-   - **Follow-up, same day:** seven changes were tested with pre-registered criteria
+   - **Follow-up:** eight changes were tested with pre-registered criteria
      ([`../2026-09-28_ctwm_actor_ablation/`](../2026-09-28_ctwm_actor_ablation/README.md)):
      - an actor-objective fix and a learned-variance reward head, which both failed;
      - a one-step motion head, which cut the world model's step-to-step position error from ~200 m to ~1–3 m;
@@ -213,7 +213,9 @@ Files: `ctwm_online_1h_{result,manifest}.json`, `ctwm_online_1h_evaluations.json
      - an edge-distance head, which roughly halved the latent's position error. Endings are still not foreseen.
      - a 16× larger latent state (one-seed pilot), which halved the error again, to ~30 m, still without
        foreseeing endings.
-     - Delivery is 0% in every run.
+     - Delivery is 0% in all of those runs.
+     - DreamerV2's 64 demonstrations and behaviour-cloning term: CT-WM picks up in 38–54% and delivers in 6–10% of
+       fresh test scenes, its first deliveries.
 6. Housekeeping for the team: the stale `models.py` hash guard in `prepare_kl_validation.py`; the Linux-only
    `pause_after_seed1` test; the ARM tolerance of the `unet_depth2` parity fixture; and the iCloud venv trap on macOS
    (HANDBOOK §9).
