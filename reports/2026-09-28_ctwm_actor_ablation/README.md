@@ -418,41 +418,153 @@ reward head. This is the only change from experiment 4.
   - The motion head's held-out 1-step error stays ≤ 11 m.
   - The median world-model gradient norm after 1,000 updates is ≤ 70.
 
+## Results: experiment 5, actor fix + motion head + two-hot reward head
+
+Both runs completed exactly 137,680 steps (~79 min each), and checkpoint restore was verified. Their step-0
+evaluations reproduced experiment 4 exactly.
+
+**Verdict against the pre-registered criteria:**
+
+| Criterion | Seed 17 | Seed 18 | Verdict |
+|---|---:|---:|---|
+| **Mechanism A (primary):** predicted reward on ending steps ≥ 50% of actual (exp 4: 3% / 2%) | 46% | **61%** | ❌ Fail (passes on seed 18 only) |
+| **Mechanism B:** ordinary-step correlation ≥ 0.3 and RMSE / std ≤ 3 (exp 4: +0.75 / +0.78, 1.0× / 0.8×) | +0.06, 18.8× | +0.21, 14.5× | ❌ Fail |
+| **Behaviour:** Q4 final distance < 820 m or pickups ≥ 10%, and better than exp 4 | 896 m, 2.0% | 976 m, 1.0% | ❌ Fail |
+| **Guardrail:** 15-step open-loop RMSE ≤ 1.1× exp 4 (0.382 / 0.441) | 0.390 | 0.456 | ✅ Pass |
+| **Guardrail:** motion head ≤ 11 m; median world-model gradient ≤ 70 | 2.9 m, 31.6 | 2.5 m, 29.4 | ✅ Pass |
+
+**The out-of-bounds exploit is gone. The actor still does not deliver, and the pre-registered criteria mostly
+fail.**
+
+| Last quarter of policy episodes | Exp 4, seed 17 | Exp 5, seed 17 | Exp 4, seed 18 | Exp 5, seed 18 |
+|---|---:|---:|---:|---:|
+| Out of bounds | 94% | **18%** | 94% | **34%** |
+| Mean speed | 12.3 m/step | 5.0 m/step | 12.6 m/step | 5.8 m/step |
+| Mean episode length | 52 | 89 | 48 | 84 |
+| Final distance to active goal | 1,156 m | **896 m** | 1,161 m | **976 m** |
+| Pickups | 2.9% | 2.0% | 5.6% | 1.0% |
+
+- **Deterministic evaluation:** still 0% delivery. Out-of-bounds endings are 35% / 18% (fixed / fresh scenes) for
+  seed 17 and 50% / 38% for seed 18, against 90–100% in experiment 4.
+- **Both runs first went the way experiment 4 did:**
+  - Out-of-bounds endings peaked at 60% (seed 17, at 57k steps) and 74% (seed 18, at 40k).
+  - They then fell below 30% by 79k / 76k steps and stayed there.
+  - Experiment 4 passed 60% at 40k / 58k steps and never came back.
+- The flights are the slowest of any condition (5.0 / 5.8 m/step; experiment 3: 7.4 / 7.5). The checks below do
+  not explain why.
+
+**Exploratory checks** (not pre-registered; designed after the results were in):
+
+1. **The ordinary-step miss is ending risk, not imprecision** (`ending_check.py`, the same last 100 episodes).
+   - The two-hot distribution has a *body*, the bins of ordinary-sized rewards, and a *tail*, the bins of
+     ending-sized ones (|bin| > 4, more than ~0.074 from μ).
+   - The body alone, i.e. the prediction given that the step does not end, tracks ordinary rewards more closely
+     than any earlier head's prediction: correlation **+0.93 / +0.96**, RMSE 0.36× / 0.33× the std.
+   - The expected reward also includes the tail. On ordinary steps it averages 0.56% / 0.53% of the probability
+     (median 0.03% / 0.01%). At about −0.7 per ending, that outweighs ordinary variation (std ~0.0014).
+   - Over all steps, the average tail probability matches the actual ending rate: 1.07% vs 1.12% (seed 17) and
+     1.25% vs 1.18% (seed 18).
+   - So the head's ending risk is calibrated on average, and Mechanism B, which scores only steps that did not
+     end, penalises it. That criterion was written for single-Gaussian heads.
+2. **What each model charges for an ending** (`ending_check.py`). Seed 17 / seed 18:
+
+   | Last 100 episodes | Exp 3 | Exp 4 | Exp 5 |
+   |---|---:|---:|---:|
+   | Timeout endings: predicted share of the penalty | 92% / 59% | 17% / 5% | 55% / 86% |
+   | Timeout endings: discount head's ending probability | 0.98 / 0.65 | 0.58 / 0.46 | 0.64 / 0.97 |
+   | Out-of-bounds endings: predicted share of the penalty | 10% / 9% | 2% / 2% | 5% / 8% |
+   | Out-of-bounds endings: discount head's ending probability | 0.15 / 0.07 | 0.13 / 0.14 | 0.03 / 0.09 |
+   | Slope of predicted reward on predicted ending probability, all steps (≈ −0.69 if the heads agree) | −0.61 / −0.61 | −0.08 / −0.04 | −0.63 / −0.57 |
+
+   (Experiment 4 has only 10 / 6 timeouts in these episodes.)
+   - **Experiment 4's exploit, explained.** Its discount head expected endings, but its reward head charged almost
+     nothing for them (slope −0.08 / −0.04). In imagination, every foreseen ending was a free exit that saved the
+     remaining step costs. Flying off the map is the only ending the actor can bring forward.
+   - **Experiment 5 removes the contradiction.** Its two heads agree about as well as experiment 3's. Any ending it
+     foresees costs its probability-weighted penalty, as in the real task, where every failure has about the same
+     discounted return.
+   - **Over training** (`*_ending_timeline.json`, every checkpoint, each scored on the 100 episodes before it):
+     - Experiment 3's slope stays between −0.26 and −0.98 (26 of 30 checkpoints between −0.45 and −0.75), with no
+       exploit.
+     - Experiment 4's slope is between −0.01 and −0.19 at 28 of 30 checkpoints, and the exploit locks in.
+     - Experiment 5's zero-initialised head starts at −0.02 to −0.43 (before 35k steps). Both exploit peaks came
+       while it was still −0.22 to −0.25. From 80k steps it is −0.38 to −0.66, and out-of-bounds endings fell.
+   - **Mechanism A's pass on seed 18 comes from timeouts.** Those are 69–83% of the endings scored, and the elapsed
+     time is part of the observation.
+3. **No world model so far sees out-of-bounds endings coming.**
+   - At the step that leaves the map, the discount head gives 0.03–0.15, and every reward head predicts 2–10% of
+     the penalty.
+   - A likely reason (`delta_check.py`): the motion head knows each step's change to 1–3 m, but the absolute
+     position decoded from the latent is off by 163–243 m in every run except experiment 2's seed 18. In
+     experiment 5 it is 253–375 m.
+   - Whether the next step leaves the map is decided within one step (~5 m) of the edge.
+4. **A first sign of goal-directed flight** (`progress_check.py`). Distance to the active goal at the start minus
+   at the end of an episode, last quarter of training (standard errors 11–19 m):
+
+   | Net progress, seed 17 / seed 18 | Baseline | Actor fix | + reward std | + motion head | + reward norm | + two-hot |
+   |---|---:|---:|---:|---:|---:|---:|
+   | All episodes | −59 m / – | −89 / −111 | −46 / −69 | −120 / −108 | −193 / −210 | **+69** / −44 |
+   | Timeout episodes | −28 m / – | −37 / −70 | −16 / −38 | −54 / −20 | (6% of episodes) | **+98 / +27** |
+
+   - Seed 17's drones end about 70 m closer to their goal than they started, the first run to do so. Seed 18's do
+     so only in timeout episodes.
+   - The effect is small (episodes start ~950 m from the goal) and comes from two seeds.
+5. **A cost.** The absolute position decoded on held-out flights got worse: 375 / 301 m, against 208–243 m in the
+   other runs except experiment 2's seed 18 (918 m). The pre-registered 15-step guardrail still passed.
+
+**Interpretation.**
+- The change did what it was built to do. Imagined endings now carry their probability-weighted penalty, so
+  ending an episode early no longer looks like a saving, and the exploit disappeared.
+- The two mechanism criteria measured this poorly:
+  - Mechanism A mixes two things: how well endings are foreseen (a property of the latent state) and how they are
+    priced (the reward head).
+  - Mechanism B penalises ending risk that is calibrated on average.
+- The actor still does not deliver. What limits the world model now is that it cannot see out-of-bounds endings
+  coming, because it does not know where the edge is to within a step.
+
+**Next step (not run).** Teach the latent where the edge is, on top of actor fix + motion head + two-hot reward.
+- Use the recipe that fixed motion: an auxiliary head with a fixed-scale, normalised target. Here the target is
+  the distance to the nearest map edge (for example in units of ~20 m, clipped), so that metres near the boundary
+  matter.
+- Mechanism: at out-of-bounds steps, the discount head's ending probability should rise well above today's
+  0.03–0.15.
+- Longer runs would show whether the small goal-directed progress grows into pickups.
+
 ## Figures
 
 One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned
-reward std, yellow = actor fix + motion head, pink = actor fix + motion head + normalised reward. Seed 18 has no
-baseline run.
+reward std, yellow = actor fix + motion head, pink = actor fix + motion head + normalised reward, green = actor fix +
+motion head + two-hot reward. Seed 18 has no baseline run.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="final_distance_to_goal_dark.png">
-  <img alt="Two-panel line chart (seeds 17 and 18) of the rolling mean distance to the active goal at the end of training episodes, for five conditions. Eight runs stay between about 860 and 1,210 m; the normalised-reward runs drift higher, up to about 1,270 to 1,410 m. None trends down toward the 820 m threshold." src="final_distance_to_goal_light.png">
+  <img alt="Two-panel line chart (seeds 17 and 18) of the rolling mean distance to the active goal at the end of training episodes, for six conditions. The baseline, actor-fix, reward-std and motion-head runs stay between about 860 and 1,210 m; the normalised-reward runs drift higher, up to about 1,270 to 1,410 m. The two-hot runs dip lowest, to about 710 m (seed 17) and 780 m (seed 18) around 85,000 steps, and end near 850 and 945 m; only they cross below the 820 m threshold, briefly." src="final_distance_to_goal_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="training_pickup_rate_dark.png">
-  <img alt="Two-panel line chart of the rolling pickup rate in training episodes for five conditions. Every condition fluctuates between 0% and at most 9% with no sustained upward trend; the pre-registered threshold was 10%." src="training_pickup_rate_light.png">
+  <img alt="Two-panel line chart of the rolling pickup rate in training episodes for six conditions. Every condition fluctuates between 0% and at most 9% with no sustained upward trend; the pre-registered threshold was 10%." src="training_pickup_rate_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="training_oob_rate_dark.png">
-  <img alt="Two-panel line chart of the rolling out-of-bounds rate in training episodes for five conditions. Most runs stay between about 15% and 70%; the normalised-reward runs climb to about 95 to 100% after roughly 40,000 (seed 17) and 50,000 (seed 18) environment steps." src="training_oob_rate_light.png">
+  <img alt="Two-panel line chart of the rolling out-of-bounds rate in training episodes for six conditions. The normalised-reward runs climb to about 95 to 100% after roughly 40,000 (seed 17) and 50,000 (seed 18) environment steps and stay there. The two-hot runs peak at 60% (seed 17, near 57,000 steps) and 74% (seed 18, near 40,000), then fall back and end near 17% and 31%. The other runs stay between about 15% and 70%." src="training_oob_rate_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="world_model_15step_dark.png">
-  <img alt="Two-panel log-scale line chart of the world model's 15-step open-loop error divided by the persistence error. Baseline, actor-fix, motion-head and normalised-reward runs fall from about x2.2 to about x0.85 to x1.0; the learned-reward-std runs plateau around x1.25 to x1.5." src="world_model_15step_light.png">
+  <img alt="Two-panel log-scale line chart of the world model's 15-step open-loop error divided by the persistence error. The baseline, actor-fix, motion-head, normalised-reward and two-hot runs fall from about x2.2 to about x0.85 to x1.02; the learned-reward-std runs plateau around x1.25 to x1.5." src="world_model_15step_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="actor_gradient_norm_dark.png">
-  <img alt="Two-panel log-scale line chart of the actor gradient norm over actor-critic updates. The baseline's median is about 0.012; the actor-fix and motion-head runs sit about 3 times higher (medians 0.034 to 0.039); the reward-std and normalised-reward runs sit about 1.6 to 2 times higher (medians about 0.02 to 0.026)." src="actor_gradient_norm_light.png">
+  <img alt="Two-panel log-scale line chart of the actor gradient norm over actor-critic updates. The baseline's median is about 0.012; the actor-fix and motion-head runs sit about 3 times higher (medians 0.034 to 0.039); the reward-std and normalised-reward runs sit about 1.6 to 2 times higher (medians about 0.02 to 0.026); the two-hot runs are highest (medians 0.047 and 0.055)." src="actor_gradient_norm_light.png">
 </picture>
 
 ## Overall conclusions
 
-1. **No change so far makes the CT-WM actor deliver within 137,680 steps.** All nine runs end at 0% delivery:
-   baseline, 2 × actor fix, 2 × + reward std, 2 × + motion head, 2 × + normalised reward.
+1. **No change so far makes the CT-WM actor deliver within 137,680 steps.** All eleven runs end at 0% delivery:
+   baseline, 2 × actor fix, 2 × + reward std, 2 × + motion head, 2 × + normalised reward, 2 × + two-hot reward.
 2. **The imagination-scale hypothesis is rejected as the sole cause.** Up-weighting the RL term increases actor
    gradients ~3× but amplifies an uninformative signal (with slightly more out-of-bounds endings).
 3. **The learned reward-std head, in this form, is rejected and harmful.** It does not improve reward prediction,
@@ -466,20 +578,34 @@ baseline run.
      to **+0.75–0.78**, with RMSE ≈ the real variation.
 6. **Once imagined rewards carry a signal, the actor does learn from them, but it exploits a biased terminal
    prediction.**
-   - A Gaussian mean in symlog space predicts almost no penalty for ending the episode (−0.02 instead of −0.68).
+   - A Gaussian mean in symlog space predicts almost no penalty for ending the episode (−0.02 instead of −0.68),
+     although the discount head expects the ending.
    - The actor therefore learns to fly off the map quickly: 94% out of bounds, at almost twice the speed.
    - The terminal outcome has to be represented so that its expected value survives.
+7. **A two-hot reward head whose mean is taken in original units removes the exploit** (exploratory checks; the
+   pre-registered criteria mostly failed).
+   - Imagined endings carry their probability-weighted penalty again, consistent with the discount head, and
+     out-of-bounds endings fall from 94% to 18–34%.
+   - Its prediction for steps that do not end is the most accurate so far (+0.93 / +0.96). Its full expectation
+     adds ending risk that is calibrated on average.
+   - Seed 17 shows the first net progress toward the goal (+69 ± 13 m per episode).
+8. **The world model does not know where the edge is.**
+   - Step-to-step motion is known to 1–3 m, but the absolute position decoded from the latent is off by ~160–380 m
+     in every run (750–920 m in experiment 2's seed 18).
+   - No world model so far foresees out-of-bounds endings: at most 0.15 predicted ending probability, and 2–10% of
+     the penalty.
 
-**Suggested next experiments** (not run; one variable each, on top of actor fix + motion head):
+**Suggested next experiments** (not run; one variable each, on top of actor fix + motion head + two-hot reward):
 
-- **A two-hot symlog reward head (now experiment 5).** A categorical distribution over symlog bins, trained with
-  DreamerV3's two-hot loss. Its expected reward is taken in original units (Σ p_i · symexp(bin_i)), not with
-  DreamerV3's squashed-space read-out (see the correction under experiment 4). This aims to keep both the
-  ordinary-step precision of experiment 4 and the full weight of rare terminal penalties.
-- **A split reward.** The normalised head on non-terminal steps, plus a raw-scale head for terminal steps,
-  combined with the predicted termination probability.
+- **An edge-distance head.** An auxiliary head with a fixed-scale, normalised target: the distance to the nearest
+  map edge, in units of ~20 m, clipped. This is the recipe that fixed motion. Mechanism: the discount head's
+  ending probability at out-of-bounds steps rises well above 0.15.
+- **Longer runs** of experiment 5's configuration, to see whether the small goal-directed progress grows into
+  pickups.
 - **Analytic shaping in imagination.** Compute γΦ(s′) − Φ(s) from the motion head's predicted displacement,
   projected onto the goal direction.
+- **Criteria for distributional reward heads** should score ending pricing (the slope above) and foreseeing
+  endings separately, and score ordinary steps on the no-ending prediction.
 - Any positive result needs ≥ 3 seeds per condition. Seed 18 in these experiments has no baseline control.
 
 ## Files in this folder
@@ -488,9 +614,11 @@ baseline run.
 |---|---|
 | `run_ablation.py`, `ablation_patches.py` | Wrapper and runtime patches (the team's code is not modified) |
 | `*_ablation.json` | Per-run record of the changes and the wrapper/patch SHA-256 |
-| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*`, `imagscale1_delta_seed{17,18}_*`, `imagscale1_delta_rewardnorm_seed{17,18}_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, motion check, terminal-reward check (experiments 3–4), `result.json`, `manifest.json` |
+| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*`, `imagscale1_delta_seed{17,18}_*`, `imagscale1_delta_rewardnorm_seed{17,18}_*`, `imagscale1_delta_twohot_seed{17,18}_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, motion check, terminal-reward check (experiments 3–5), ending check (experiments 3–5), `result.json`, `manifest.json` |
+| `*_ending_timeline.json` | The ending check at every checkpoint (experiments 3–5) |
+| `progress_check.json` | Net progress toward the goal, all runs |
 | `baseline_reward_signal.json`, `baseline_delta_check.json` | Reward and motion checks on the first report's final checkpoint |
-| `sweep_world_model.py`, `reward_signal_check.py`, `delta_check.py`, `terminal_reward_check.py`, `make_figures.py` | Analysis scripts (reproduce the files and figures) |
+| `sweep_world_model.py`, `reward_signal_check.py`, `delta_check.py`, `terminal_reward_check.py`, `ending_check.py`, `progress_check.py`, `make_figures.py` | Analysis scripts (reproduce the files and figures) |
 | `*_light.png`, `*_dark.png` | Comparison figures |
 
 The git history records which script revision each set of runs used:
@@ -498,4 +626,5 @@ The git history records which script revision each set of runs used:
 - actor-fix runs: wrapper `82ec9cd`;
 - reward-fix runs: wrapper and patches `4f09dfd`;
 - motion-head runs: wrapper `228d35d`, patches `ff40afa`;
-- normalised-reward runs: wrapper and patches `f032152`.
+- normalised-reward runs: wrapper and patches `f032152`;
+- two-hot runs: wrapper and patches `eebe243`.
