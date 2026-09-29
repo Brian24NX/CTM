@@ -908,6 +908,40 @@ Their step-0 evaluations reproduced experiment 6 exactly.
 - **Close the rest of the gap to DreamerV2's recipe:** its 3,000-update cloning warm start and its event-prioritised
   replay.
 
+## Ninth experiment: imitation-only control (pre-registered)
+
+_Written at 18:31 CDT on 2026-09-29, before launch._
+
+**Question.** How much of experiment 8's behaviour comes from reinforcement learning in imagination, and how much
+from imitating the demonstrations alone?
+
+**Change.** Experiment 8 with the imagination term switched off (`--imagination-scale 0.0`). This is the only
+change.
+- **The actor's loss** becomes the cloning term plus the small entropy bonus. Nothing reward-driven reaches the
+  actor any more: the policy-gradient score and the dynamics term are both scaled by the imagination term.
+- **Everything else as in experiment 8:** the world model (demonstrations included), the critic and all heads
+  still train.
+- **No code change:** the wrapper and patches are experiment 8's files (same SHA-256).
+- **Pairing, verified:** initial weights are unchanged, and short runs reproduce the step-0 evaluations of
+  experiments 6 and 8: 0 / 5 / 70 / 30% (seed 17) and 0 / 5 / 0 / 100% (seed 18).
+- Seeds 17 and 18, 137,680 steps, compared seed-for-seed with experiment 8.
+
+**Criteria**, compared with experiment 8 on the same seed:
+
+- **Primary:** the last-quarter pickup rate in training episodes (experiment 8: 28.2% / 42.8%).
+  - **Reinforcement learning contributes** if the control is at least 10 points lower on both seeds.
+  - **Imitation accounts for most of it** if the control is within 10 points, or higher, on both seeds.
+  - Otherwise the result is inconclusive.
+- **Also reported:**
+  - fresh-scene deterministic pickups and deliveries (experiment 8: 38% / 54% and 6% / 10%);
+  - last-quarter deliveries, final distance, net progress and out-of-bounds rate;
+  - the demonstration check.
+- **Sanity check:** imitation still works. Balanced MOVE/TURN agreement is ≥ 0.8 (experiment 8: 0.96 / 0.97).
+- **Guardrails:**
+  - The 15-step open-loop vector RMSE is ≤ 1.1× experiment 8's (0.343 / 0.358).
+  - The motion head's held-out 1-step error stays ≤ 11 m.
+  - The median world-model gradient norm after 1,000 updates is ≤ 70.
+
 ## Figures
 
 One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned
