@@ -80,20 +80,20 @@
   "imagscale1_rewardstd_seed17": {
     "policy_episodes": 1554,
     "last_quarter": {
-      "episodes": 389,
-      "start_m": 966.1241235022067,
-      "end_m": 1012.0333636757034,
-      "progress_m": -45.90924017349675,
-      "progress_se_m": 11.336259914654372
+      "episodes": 390,
+      "start_m": 965.6321496816781,
+      "end_m": 1012.2878751705854,
+      "progress_m": -46.65572548890725,
+      "progress_se_m": 11.331769477548486
     },
-    "timeout_share": 0.7634961439588689,
-    "oob_share": 0.2365038560411311,
+    "timeout_share": 0.764102564102564,
+    "oob_share": 0.2358974358974359,
     "timeout": {
-      "episodes": 297,
-      "start_m": 937.4387055470887,
-      "end_m": 953.1376439874822,
-      "progress_m": -15.698938440393519,
-      "progress_se_m": 12.562549540847039
+      "episodes": 298,
+      "start_m": 936.8911069831593,
+      "end_m": 953.6683661441675,
+      "progress_m": -16.777259161008285,
+      "progress_se_m": 12.566672100329429
     },
     "oob": {
       "episodes": 92,
@@ -132,14 +132,14 @@
   "imagscale1_delta_seed17": {
     "policy_episodes": 1646,
     "last_quarter": {
-      "episodes": 412,
-      "start_m": 955.6897319312235,
-      "end_m": 1075.261775229741,
-      "progress_m": -119.57204329851761,
-      "progress_se_m": 13.715413466094788
+      "episodes": 413,
+      "start_m": 956.9147748231311,
+      "end_m": 1076.841690950186,
+      "progress_m": -119.9269161270548,
+      "progress_se_m": 13.686765305639126
     },
-    "timeout_share": 0.5776699029126213,
-    "oob_share": 0.4223300970873786,
+    "timeout_share": 0.576271186440678,
+    "oob_share": 0.423728813559322,
     "timeout": {
       "episodes": 238,
       "start_m": 887.8477068348092,
@@ -148,37 +148,37 @@
       "progress_se_m": 17.637177701736753
     },
     "oob": {
-      "episodes": 174,
-      "start_m": 1048.4851455688477,
-      "end_m": 1257.423617220473,
-      "progress_m": -208.93847165162535,
-      "progress_se_m": 19.884131236268438
+      "episodes": 175,
+      "start_m": 1050.8459872872488,
+      "end_m": 1260.1112935093472,
+      "progress_m": -209.26530622209822,
+      "progress_se_m": 19.772882501769676
     }
   },
   "imagscale1_delta_seed18": {
     "policy_episodes": 1695,
     "last_quarter": {
-      "episodes": 424,
-      "start_m": 933.303102997114,
-      "end_m": 1041.2387360986675,
-      "progress_m": -107.9356331015533,
-      "progress_se_m": 14.465507382901825
+      "episodes": 426,
+      "start_m": 934.6402503000179,
+      "end_m": 1042.9992724136569,
+      "progress_m": -108.35902211363886,
+      "progress_se_m": 14.413852937889558
     },
-    "timeout_share": 0.5825471698113207,
-    "oob_share": 0.41745283018867924,
+    "timeout_share": 0.5821596244131455,
+    "oob_share": 0.41784037558685444,
     "timeout": {
-      "episodes": 247,
-      "start_m": 902.4534158436393,
-      "end_m": 922.0548942658583,
-      "progress_m": -19.60147842221897,
-      "progress_se_m": 18.969978480103656
+      "episodes": 248,
+      "start_m": 904.0070291334583,
+      "end_m": 923.5791652433334,
+      "progress_m": -19.572136109875096,
+      "progress_se_m": 18.893354574003574
     },
     "oob": {
-      "episodes": 177,
-      "start_m": 976.3532313977257,
-      "end_m": 1207.5574306337173,
-      "progress_m": -231.20419923599158,
-      "progress_se_m": 18.83115725271579
+      "episodes": 178,
+      "start_m": 977.3202438354492,
+      "end_m": 1209.3823430779275,
+      "progress_m": -232.06209924247827,
+      "progress_se_m": 18.744707678994036
     }
   },
   "imagscale1_delta_rewardnorm_seed17": {
@@ -236,20 +236,20 @@
   "imagscale1_delta_twohot_seed17": {
     "policy_episodes": 1583,
     "last_quarter": {
-      "episodes": 396,
-      "start_m": 966.0877621968588,
-      "end_m": 896.6423482220582,
-      "progress_m": 69.4454139748005,
-      "progress_se_m": 13.007002413598581
+      "episodes": 398,
+      "start_m": 965.7948440858468,
+      "end_m": 896.0334760004552,
+      "progress_m": 69.76136808539155,
+      "progress_se_m": 12.952196316357027
     },
-    "timeout_share": 0.8207070707070707,
-    "oob_share": 0.17929292929292928,
+    "timeout_share": 0.821608040201005,
+    "oob_share": 0.17839195979899497,
     "timeout": {
-      "episodes": 325,
-      "start_m": 980.2776614614634,
-      "end_m": 881.9772272432767,
-      "progress_m": 98.3004342181866,
-      "progress_se_m": 14.896116171423117
+      "episodes": 327,
+      "start_m": 979.834355018919,
+      "end_m": 881.3258483373426,
+      "progress_m": 98.50850668157642,
+      "progress_se_m": 14.816889297552251
     },
     "oob": {
       "episodes": 71,
@@ -283,6 +283,58 @@
       "end_m": 1100.6277717969097,
       "progress_m": -182.6816197388561,
       "progress_se_m": 21.334117367564964
+    }
+  },
+  "imagscale1_delta_twohot_edge_seed17": {
+    "policy_episodes": 1646,
+    "last_quarter": {
+      "episodes": 413,
+      "start_m": 956.9147748231311,
+      "end_m": 924.0577255322916,
+      "progress_m": 32.85704929083946,
+      "progress_se_m": 16.71223769289171
+    },
+    "timeout_share": 0.5980629539951574,
+    "oob_share": 0.4019370460048426,
+    "timeout": {
+      "episodes": 247,
+      "start_m": 984.8457359900841,
+      "end_m": 825.1619702234924,
+      "progress_m": 159.68376576659168,
+      "progress_se_m": 20.030865284369423
+    },
+    "oob": {
+      "episodes": 166,
+      "start_m": 915.3548506771225,
+      "end_m": 1071.209843371288,
+      "progress_m": -155.85499269416533,
+      "progress_se_m": 22.00258575688609
+    }
+  },
+  "imagscale1_delta_twohot_edge_seed18": {
+    "policy_episodes": 1621,
+    "last_quarter": {
+      "episodes": 406,
+      "start_m": 932.3018265898005,
+      "end_m": 932.4083873203823,
+      "progress_m": -0.10656073058180034,
+      "progress_se_m": 12.525435907113877
+    },
+    "timeout_share": 0.7315270935960592,
+    "oob_share": 0.2684729064039409,
+    "timeout": {
+      "episodes": 297,
+      "start_m": 929.1320243861137,
+      "end_m": 871.4574373290194,
+      "progress_m": 57.67458705709438,
+      "progress_se_m": 12.548519507143409
+    },
+    "oob": {
+      "episodes": 109,
+      "start_m": 940.9388105759926,
+      "end_m": 1098.4857464711602,
+      "progress_m": -157.54693589516737,
+      "progress_se_m": 26.489511995730762
     }
   }
 }

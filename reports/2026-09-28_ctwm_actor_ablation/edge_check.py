@@ -9,7 +9,8 @@ From the one-step PRIOR state (what imagination uses), it reports:
   stored discounts are 0.99 or 0), and the reward head's predicted reward as a share of the actual one;
 - at steps within 20 m of an edge that do not end: the same ending probability (false alarms);
 - on rows whose nearest edge is within 50 m: the error of the predicted distance to the nearest edge, in metres,
-  from the vector head's x/y (every run) and from the edge head (experiment-6 runs).
+  from the vector head's x/y (every run) and from the edge head (experiment-6 runs). The same errors from the
+  POSTERIOR state, which has already seen that row's observation, show how much is lost in the one-step prediction.
 
 Usage (with the TensorFlow venv):  python -B edge_check.py <run_dir> <checkpoint.pkl> out.json
 """
@@ -48,8 +49,8 @@ def own_episodes(run_dir, checkpoint):
 
 
 def check(agent, data):
-    _, prior, *_ = agent.world.forward({k: tf.constant(v) for k, v in data.items()}, False)
-    feat = agent.world.core.get_feat(prior)
+    post, prior, *_ = agent.world.forward({k: tf.constant(v) for k, v in data.items()}, False)
+    feat, post_feat = agent.world.core.get_feat(prior), agent.world.core.get_feat(post)
     p_end = 1 - agent.world.discount(feat).mean().numpy() / GAMMA
     predicted = agent.world.reward(feat).mean().numpy()
     actual_edge = nearest_edge_m(data['vector'][..., :2])
@@ -71,10 +72,13 @@ def check(agent, data):
                          end_prob_median=float(np.median(p_end[oob])),
                          reward_share=float(predicted[oob].mean() / data['reward'][oob].mean())) if oob.any() else None,
         near_edge_no_ending=dict(steps=int(near.sum()), end_prob_mean=float(p_end[near].mean())) if near.any() else None,
-        nearest_edge_error_m=dict(rows=int(band.sum()), vector_head=error(vector_edge)))
+        nearest_edge_error_m=dict(rows=int(band.sum()), vector_head=error(vector_edge)),
+        nearest_edge_error_posterior_m=dict(
+            rows=int(band.sum()), vector_head=error(nearest_edge_m(agent.world.vector(post_feat).mean().numpy()[..., :2]))))
     if hasattr(agent.world, 'edge'):
-        distances = ablation_patches.edge_prediction(agent.world.edge(feat).mean()).numpy()
-        result['nearest_edge_error_m']['edge_head'] = error(1000 * distances.min(-1))
+        for key, features in (('nearest_edge_error_m', feat), ('nearest_edge_error_posterior_m', post_feat)):
+            distances = ablation_patches.edge_prediction(agent.world.edge(features).mean()).numpy()
+            result[key]['edge_head'] = error(1000 * distances.min(-1))
     return result
 
 

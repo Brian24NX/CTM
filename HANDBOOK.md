@@ -68,12 +68,13 @@ Recurrent Space Model)**. The full agent is **CT-WM (Continuous-Thought World Mo
   - CT-WM runs end to end and its CTM core is numerically faithful to the official code.
   - In a 1-hour run (137k steps), its **world model learned** to roughly match a "nothing changes" guess at 5–15
     steps ahead. Its **actor did not learn at all**: it stayed a random policy with 0% deliveries.
-  - Five follow-up experiments did not change that (0% delivery in all of them):
+  - Six follow-up experiments did not change that (0% delivery in all of them):
     - a stronger actor signal;
     - a learned-variance reward head;
     - a one-step motion head;
     - a normalised reward target;
-    - a two-hot reward head.
+    - a two-hot reward head;
+    - an edge-distance head.
   - Three real problems were fixed along the way:
     - The motion head cut the world model's step-to-step position error from ~200 m to ~1–3 m.
     - The normalised reward target made ordinary-step reward predictions accurate (correlation ~0.76).
@@ -82,10 +83,14 @@ Recurrent Space Model)**. The full agent is **CT-WM (Continuous-Thought World Mo
     reward head charged almost nothing for ending an episode, so the drone learned to fly off the map (94%).
   - The two-hot head, with its expected reward taken in original units, charges endings their penalty again.
     - Flying off the map fell to 18–34%.
-    - One seed shows the first net progress toward the goal (+69 m per episode).
+    - One seed shows the first net progress toward the goal (+70 m per episode).
   - What limits it now: the world model cannot see out-of-bounds endings coming. It knows each step's motion to a
-    few metres, but its absolute position is off by ~200–380 m, so it cannot tell when the drone is one step from
-    the edge.
+    few metres, but not where the drone is on the map.
+    - An edge-distance head roughly halved the position error, but even right after seeing the exact position the
+      model is still 30–60 m off.
+    - The likely limit is the compact model's tiny random latent state: 8 variables × 8 values, against 32 × 32 in
+      the full-size model.
+    - A larger latent is the next test, a good first job for the GPU cluster.
   - Early training shows enormous gradients (up to ~1e9). They settle after ~600 updates.
 - No comparison so far is a fair, matched benchmark. The open problems are listed in [§9](#9-known-issues-and-open-questions).
 
@@ -786,9 +791,10 @@ Details, commands and the small result files are in [`reports/2026-09-28_first_r
 | **CT-WM online, 1 hour, seed 17** (the team's 1-hour protocol, defaults unchanged) | **137,680 env steps and 27,380 updates** (the team's GPU managed 8,400 steps in 1 h, so ~16× faster). **0% delivery** on fixed and fresh scenes. The actor stayed statistically random for all 1,540 policy episodes |
 | CT-WM world model at all 13 checkpoints (the 8 held-out episodes of the offline check) | 1-step open-loop RMSE 1.05 → 0.24 (persistence 0.11); 15-step 1.03 → 0.44 (persistence 0.45). **Matches "nothing changes" at 15 steps and is still improving** |
 | World-model gradient norm (online run) | ~8e5 at the start, below the clip (100) from update ~630, then a median of 23. **The explosion is an early transient** |
-| **Ablations** (10 runs, each 137,680 steps; [`reports/2026-09-28_ctwm_actor_ablation/`](reports/2026-09-28_ctwm_actor_ablation/README.md)) | `imagination_scale` 1.0: actor gradients ~3× larger, behaviour still random. + learned-variance reward head: hurt the world model. + one-step motion head: **motion error 1–3 m (was ~200 m)**, reward correlation only +0.17 to +0.32. + normalised reward target: **reward correlation +0.75 to +0.78**, and the actor responds (speed ×1.7), but it flies off the map in 94% of episodes. Normalised target + two-hot reward head instead: **out of bounds 18–34%**, and seed 17's drones end 69 ± 13 m closer to their goal than they started, a first. **0% delivery in every run** |
+| **Ablations** (12 runs, each 137,680 steps; [`reports/2026-09-28_ctwm_actor_ablation/`](reports/2026-09-28_ctwm_actor_ablation/README.md)) | `imagination_scale` 1.0: actor gradients ~3× larger, behaviour still random. + learned-variance reward head: hurt the world model. + one-step motion head: **motion error 1–3 m (was ~200 m)**, reward correlation only +0.17 to +0.32. + normalised reward target: **reward correlation +0.75 to +0.78**, and the actor responds (speed ×1.7), but it flies off the map in 94% of episodes. Normalised target + two-hot reward head instead: **out of bounds 18–34%**, and seed 17's drones end 70 ± 13 m closer to their goal than they started, a first. + edge-distance head: position error roughly halved, out-of-bounds endings 2.5× more foreseeable, behaviour unchanged. **0% delivery in every run** |
 | Why the actor exploited the model (normalised target) | The discount head expected endings near the edge, but the symlog-Gaussian reward head charged almost nothing for them: −0.02 predicted for ending steps whose actual reward is −0.68. Averaging in symlog space erases the rare penalty, so leaving the map looked like a free exit that saved the remaining step costs |
 | What the two-hot head fixes, and what it does not | Its expected reward, taken in original units, charges each foreseen ending its probability-weighted penalty, in agreement with the discount head. Its ordinary-step part is the most accurate so far (correlation +0.93 / +0.96). But no world model so far foresees out-of-bounds endings (2–10% of the penalty predicted): motion is known to 1–3 m, while absolute position is off by ~200–380 m |
+| What the edge-distance head changes | Near the edges, the latent's position error falls from ~130 m to 42–74 m (one step ahead) and 30–60 m (just after an observation). The predicted chance of ending at held-out out-of-bounds endings rises from 0.04–0.05 to 0.09–0.14; the bar was 0.5. Its loss plateaus by ~50k steps, pointing at the compact model's 8 × 8 stochastic state |
 
 ---
 
@@ -855,7 +861,7 @@ The list is prioritised. "Confirmed" means shown by code or a minimal reproducti
     - A two-hot symlog reward head instead, trained with DreamerV3's two-hot loss but with its expected reward taken
       in original units. (DreamerV3's own read-out averages in symlog space, the averaging that erased the
       penalty.)
-      - The exploit is gone: out of bounds 18–34%. Seed 17's drones end 69 ± 13 m closer to their goal than they
+      - The exploit is gone: out of bounds 18–34%. Seed 17's drones end 70 ± 13 m closer to their goal than they
         started, the first run to do so.
       - Its ordinary-step part is the most accurate yet (correlation +0.93 / +0.96), but the full expectation
         includes calibrated ending risk. So the pre-registered ordinary-step metric fails (+0.06 / +0.21).
@@ -864,10 +870,17 @@ The list is prioritised. "Confirmed" means shown by code or a minimal reproducti
     - What limits it now: no world model so far foresees out-of-bounds endings. Motion is known to 1–3 m, but the
       decoded absolute position is off by ~200–380 m, so the model cannot tell when the drone is one step from the
       edge.
-    - Next, on top of actor fix + motion head + two-hot reward:
-      - an edge-distance head with a fixed-scale normalised target, the recipe that fixed motion;
+    - An edge-distance head on top predicts symlog-scaled distances to the four map edges.
+      - Position error near the edges roughly halves, to 42–74 m.
+      - The predicted chance of ending at held-out out-of-bounds endings rises 2.5×, to 0.09–0.14 (the bar was 0.5).
+      - Behaviour is unchanged. **Mechanism and behaviour criteria failed; guardrails passed.**
+      - Even the posterior, which has just seen the exact position, is 30–60 m off, and the head's loss plateaus.
+        The prime suspect is the compact model's stochastic state: 8 categorical variables × 8 classes, against the
+        full model's 32 × 32.
+    - Next, on top of all of the above:
+      - a 32 × 32 stochastic state (initial weights cannot be paired across shapes, so report the step-0 difference);
       - longer runs, to see whether the small goal-directed progress grows into pickups.
-      - Any claim needs ≥ 3 seeds.
+      - Any claim needs ≥ 3 seeds. A larger model and more seeds are a good first job for the GPU cluster.
 12. **No matched comparison yet:** CT-WM differs from our DreamerV2 in actor input (latent vs. exact), use of
     demonstrations (none vs. 64), batch size (2 × 101 vs. 50 × 20) and model size. A fair comparison must match these
     or ablate them.

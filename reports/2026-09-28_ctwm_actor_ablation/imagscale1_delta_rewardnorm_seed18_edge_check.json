@@ -18,6 +18,13 @@
         "median": 90.49820709228516,
         "mean": 117.8207015991211
       }
+    },
+    "nearest_edge_error_posterior_m": {
+      "rows": 1221,
+      "vector_head": {
+        "median": 81.86531066894531,
+        "mean": 114.81160736083984
+      }
     }
   },
   "own": {
@@ -36,6 +43,13 @@
       "vector_head": {
         "median": 54.546356201171875,
         "mean": 98.7024917602539
+      }
+    },
+    "nearest_edge_error_posterior_m": {
+      "rows": 587,
+      "vector_head": {
+        "median": 49.385311126708984,
+        "mean": 99.08265686035156
       }
     }
   }

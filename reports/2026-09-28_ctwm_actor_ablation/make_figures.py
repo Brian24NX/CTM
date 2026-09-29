@@ -3,9 +3,10 @@
 Reads the baseline's small files from ../2026-09-28_first_run_mac/ and the ablation runs' from this folder;
 runs whose files do not exist yet are skipped. Usage (any Python with numpy + matplotlib):
     python make_figures.py
-Colour follows the condition (validated palette, slots 1-6): baseline, actor fix, actor fix + learned reward
+Colour follows the condition (validated palette, slots 1-7): baseline, actor fix, actor fix + learned reward
 std, actor fix + motion head, actor fix + motion head + normalised reward, actor fix + motion head + two-hot
-reward. Lines carry direct end labels where they do not collide; the legend and the README tables carry the rest.
+reward, the same + edge head. Lines carry direct end labels where they do not collide; the legend and the README
+tables carry the rest.
 """
 import csv
 import json
@@ -21,14 +22,14 @@ BASE = HERE.parent / '2026-09-28_first_run_mac'
 DPI, PX = 144, 72 / 144
 THEMES = {
     'light': dict(surface='#fcfcfb', ink='#0b0b0b', ink2='#52514e', muted='#898781', grid='#e1e0d9',
-                  axis='#c3c2b7', series=['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300']),
+                  axis='#c3c2b7', series=['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7']),
     'dark': dict(surface='#1a1a19', ink='#ffffff', ink2='#c3c2b7', muted='#898781', grid='#2c2c2a',
-                 axis='#383835', series=['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300']),
+                 axis='#383835', series=['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9']),
 }
 CONDITIONS = ['Baseline (scale 0.1)', 'Actor fix (scale 1.0)', 'Actor fix + learned reward std',
               'Actor fix + motion head', 'Actor fix + motion head + normalised reward',
-              'Actor fix + motion head + two-hot reward']
-SHORT = ['Baseline', 'Actor fix', '+ reward std', '+ motion head', '+ reward norm', '+ two-hot']
+              'Actor fix + motion head + two-hot reward', 'Actor fix + motion head + two-hot + edge head']
+SHORT = ['Baseline', 'Actor fix', '+ reward std', '+ motion head', '+ reward norm', '+ two-hot', '+ edge head']
 RUNS = [  # (condition index, seed, folder, file prefix)
     (0, 17, BASE, 'ctwm_online_1h'),
     (1, 17, HERE, 'imagscale1_seed17'), (1, 18, HERE, 'imagscale1_seed18'),
@@ -36,6 +37,7 @@ RUNS = [  # (condition index, seed, folder, file prefix)
     (3, 17, HERE, 'imagscale1_delta_seed17'), (3, 18, HERE, 'imagscale1_delta_seed18'),
     (4, 17, HERE, 'imagscale1_delta_rewardnorm_seed17'), (4, 18, HERE, 'imagscale1_delta_rewardnorm_seed18'),
     (5, 17, HERE, 'imagscale1_delta_twohot_seed17'), (5, 18, HERE, 'imagscale1_delta_twohot_seed18'),
+    (6, 17, HERE, 'imagscale1_delta_twohot_edge_seed17'), (6, 18, HERE, 'imagscale1_delta_twohot_edge_seed18'),
 ]
 SEEDS = (17, 18)
 WINDOW = 100
@@ -69,7 +71,7 @@ def style(ax, t):
 def panels(t, title, subtitle, xlabel, ylabel, log=False):
     fig, axes = plt.subplots(1, 2, figsize=(7.8, 4.3), dpi=DPI, sharey=True)
     fig.patch.set_facecolor(t['surface'])
-    fig.subplots_adjust(left=0.1, right=0.98, top=0.66, bottom=0.13, wspace=0.08)
+    fig.subplots_adjust(left=0.1, right=0.98, top=0.63, bottom=0.13, wspace=0.08)
     fig.text(0.012, 0.965, title, color=t['ink'], fontsize=11.5, fontweight='bold', va='top')
     fig.text(0.012, 0.905, subtitle, color=t['ink2'], fontsize=8.5, va='top')
     for ax, seed in zip(axes, SEEDS):

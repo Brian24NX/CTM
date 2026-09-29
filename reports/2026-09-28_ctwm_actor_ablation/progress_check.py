@@ -41,7 +41,7 @@ def check(run_dir):
         vector = episode['vector'][episode['valid'] > 0]
         distance = np.hypot(vector[:, 11], vector[:, 12]) * 2000
         rows.append((float(distance[0]), float(distance[-1]), metrics))
-    last_quarter = rows[3 * len(rows) // 4:]
+    last_quarter = rows[3 * (len(rows) // 4):]   # same split as the README's behaviour tables
     split = {name: [r for r in last_quarter if r[2][name]] for name in ('timeout', 'oob')}
     return dict(policy_episodes=len(rows), last_quarter=summary(last_quarter),
                 timeout_share=len(split['timeout']) / len(last_quarter),
