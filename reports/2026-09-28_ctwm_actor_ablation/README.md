@@ -711,42 +711,109 @@ compact. This is the only change from experiment 6.
 - One seed without paired initial weights can show whether the mechanism appears. It cannot establish a
   behavioural effect.
 
+## Results: experiment 7 (pilot), 32 × 32 stochastic state, seed 17
+
+The run completed 137,680 steps in 85.1 min of training, and checkpoint restore was verified. The laptop slept
+for ~45 min mid-run; that paused the run and does not affect its results, and the trainer's clock excludes it.
+The step-0 evaluation was 0 / 0 / 100 / 0%, as recorded before launch.
+
+**Verdict against the pre-registered criteria (seed 17):**
+
+| Criterion | Exp 7 | Exp 6 | Verdict |
+|---|---:|---:|---|
+| **Mechanism A (primary):** ending probability at the 55 held-out out-of-bounds endings ≥ 0.5 | 0.068 | 0.088 | ❌ Fail |
+| **Mechanism B:** edge head's nearest-edge error from the posterior, within 50 m of an edge, ≤ 10 m | 31.5 m | 59.6 m | ❌ Fail |
+| **Behaviour:** Q4 final distance < 820 m or pickups ≥ 10%, and better than exp 6 on both | 945 m, 2.0% | 924 m, 1.9% | ❌ Fail |
+| **Guardrail:** 15-step open-loop RMSE ≤ 1.1× exp 6 (≤ 0.438) | 0.443 | 0.398 | ❌ Fail, narrowly |
+| **Guardrail:** motion head ≤ 11 m; median world-model gradient ≤ 70 | 4.6 m, 29.0 | 2.5 m, 28.1 | ✅ Pass |
+| **Guardrail:** reward and discount heads agree, slope ≤ −0.4 | −0.58 | −0.48 | ✅ Pass |
+
+**A 16× larger stochastic state halves the latent's position error again. Out-of-bounds endings are no more
+foreseeable, and behaviour is unchanged.**
+
+| Held-out set, seed 17 | Exp 5 | Exp 6 | Exp 7 |
+|---|---:|---:|---:|
+| Nearest-edge error within 50 m of an edge, posterior (vector head / edge head) | 87 m / – | 49 / 60 m | 26 / 32 m |
+| The same, one-step prior | 129 m / – | 74 / 81 m | 30 / 26 m |
+| Ending probability at out-of-bounds endings | 0.035 | 0.088 | 0.068 |
+| Information the posterior adds per step (KL, median after 100k steps) | 1.45 nats | 1.63 nats | 2.55 nats |
+
+| Last quarter of policy episodes, seed 17 | Exp 6 | Exp 7 |
+|---|---:|---:|
+| Out of bounds | 40% | 26% |
+| Mean speed | 8.1 m/step | 4.8 m/step |
+| Mean episode length | 79 | 87 |
+| Final distance to active goal | 924 m | 945 m |
+| Pickups | 1.9% | 2.0% |
+| Net progress toward the goal: all / timeout episodes | +33 / +160 m | +18 / +53 m |
+
+- **Deterministic evaluation:** 0% delivery and no pickups. Out of bounds 5% / 6% (fixed / fresh scenes); the
+  rest time out.
+- **Over training:** the heads' slope stays between −0.17 and −0.64. The ending probability at the drone's own
+  out-of-bounds endings never exceeds 0.18.
+- **Wall-clock cost:** 85.1 min for one run alone, against 77.9 min per run for experiment 6 with two in
+  parallel. Two 32 × 32 runs in parallel were not timed.
+
+**Interpretation.**
+- Capacity was part of the limit. With a 16× larger stochastic state, the posterior carries more information per
+  step, and the near-edge position error roughly halves again, to ~26–32 m.
+- But ~30 m is still ~10× coarser than the 2–3 m margin at which drones leave the map. The ending probability at
+  those steps did not rise.
+- Across experiments 5–7 (seed 17, one-step prior), the near-edge error fell 129 → 74–81 → 26–30 m, while the
+  held-out ending probability stayed at 0.04–0.09. Gains in position precision of this size do not make endings
+  foreseeable.
+- Caveats: one seed, no paired initial weights, and the 15-step guardrail was narrowly missed.
+
+**What experiments 5–7 suggest (not run).**
+- Three world-model changes have not made out-of-bounds endings foreseeable, and more precision is expensive.
+- Since experiment 5 there is no exploit to fix: out-of-bounds rates are back in the 18–42% range of the runs
+  before experiment 4. In the real task every failure has about the same discounted return. So foreseeing crashes
+  is probably not the main problem left.
+- The bigger difference from DreamerV2's delivering runs is the learning signal. Those runs train with 64
+  demonstrations and a behaviour-cloning term; the CT-WM contract excludes both (`no_bc`), and no CT-WM run has
+  ever delivered.
+- This needs a team decision:
+  - either test CT-WM with DreamerV2's demonstrations and behaviour-cloning term, which targets the sparse-reward
+    problem directly;
+  - or keep the pure-RL contract and run many longer seeds, where the GPU cluster would pay off.
+
 ## Figures
 
 One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned
 reward std, yellow = actor fix + motion head, pink = actor fix + motion head + normalised reward, green = actor fix +
-motion head + two-hot reward, violet = the same + edge head. Seed 18 has no baseline run.
+motion head + two-hot reward, violet = the same + edge head, red = the same + 32 × 32 stochastic state (seed 17
+only). Seed 18 has no baseline run.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="final_distance_to_goal_dark.png">
-  <img alt="Two-panel line chart (seeds 17 and 18) of the rolling mean distance to the active goal at the end of training episodes, for seven conditions. The baseline, actor-fix, reward-std and motion-head runs stay between about 860 and 1,210 m; the normalised-reward runs drift higher, up to about 1,270 to 1,410 m. The two-hot runs dip lowest, to about 710 m (seed 17) and 780 m (seed 18) around 85,000 steps, and end near 850 and 945 m. The edge-head runs dip to about 750 m (seed 17, near 82,000 steps) and 810 m (seed 18, near the end). Only these two conditions cross below the 820 m threshold, briefly." src="final_distance_to_goal_light.png">
+  <img alt="Two-panel line chart (seeds 17 and 18) of the rolling mean distance to the active goal at the end of training episodes, for eight conditions. The baseline, actor-fix, reward-std and motion-head runs stay between about 860 and 1,210 m; the normalised-reward runs drift higher, up to about 1,270 to 1,410 m. The two-hot runs dip lowest, to about 710 m (seed 17) and 780 m (seed 18) around 85,000 steps, and end near 850 and 945 m. The edge-head runs dip to about 750 m (seed 17, near 82,000 steps) and 810 m (seed 18, near the end). The 32 × 32 run (seed 17 only) stays between about 870 and 1,140 m. Only the two-hot and edge-head conditions cross below the 820 m threshold, briefly." src="final_distance_to_goal_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="training_pickup_rate_dark.png">
-  <img alt="Two-panel line chart of the rolling pickup rate in training episodes for seven conditions. Every condition fluctuates between 0% and at most 9% with no sustained upward trend; the pre-registered threshold was 10%." src="training_pickup_rate_light.png">
+  <img alt="Two-panel line chart of the rolling pickup rate in training episodes for eight conditions. Every condition fluctuates between 0% and at most 9% with no sustained upward trend; the pre-registered threshold was 10%." src="training_pickup_rate_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="training_oob_rate_dark.png">
-  <img alt="Two-panel line chart of the rolling out-of-bounds rate in training episodes for seven conditions. The normalised-reward runs climb to about 95 to 100% after roughly 40,000 (seed 17) and 50,000 (seed 18) environment steps and stay there. The two-hot runs peak at 60% (seed 17, near 57,000 steps) and 74% (seed 18, near 40,000), then fall back and end near 17% and 31%. The edge-head runs swing between about 7% and 68% and end near 56% (seed 17) and 14% (seed 18). The other runs stay between about 15% and 70%." src="training_oob_rate_light.png">
+  <img alt="Two-panel line chart of the rolling out-of-bounds rate in training episodes for eight conditions. The normalised-reward runs climb to about 95 to 100% after roughly 40,000 (seed 17) and 50,000 (seed 18) environment steps and stay there. The two-hot runs peak at 60% (seed 17, near 57,000 steps) and 74% (seed 18, near 40,000), then fall back and end near 17% and 31%. The edge-head runs swing between about 7% and 68% and end near 56% (seed 17) and 14% (seed 18). The 32 × 32 run (seed 17 only) peaks at 58% near 57,000 steps and ends near 27%. The other runs stay between about 15% and 70%." src="training_oob_rate_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="world_model_15step_dark.png">
-  <img alt="Two-panel log-scale line chart of the world model's 15-step open-loop error divided by the persistence error. The baseline, actor-fix, motion-head, normalised-reward, two-hot and edge-head runs fall from about x2.2 to about x0.85 to x1.02; the learned-reward-std runs plateau around x1.25 to x1.5." src="world_model_15step_light.png">
+  <img alt="Two-panel log-scale line chart of the world model's 15-step open-loop error divided by the persistence error. The baseline, actor-fix, motion-head, normalised-reward, two-hot, edge-head and 32 x 32 runs fall from about x2.2 to about x0.85 to x1.02; the learned-reward-std runs plateau around x1.25 to x1.5." src="world_model_15step_light.png">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="actor_gradient_norm_dark.png">
-  <img alt="Two-panel log-scale line chart of the actor gradient norm over actor-critic updates. The baseline's median is about 0.012; the actor-fix and motion-head runs sit about 3 times higher (medians 0.034 to 0.039); the reward-std and normalised-reward runs sit about 1.6 to 2 times higher (medians about 0.02 to 0.026); the two-hot runs are highest (medians 0.047 and 0.055), and the edge-head runs are close to them (0.041 and 0.031)." src="actor_gradient_norm_light.png">
+  <img alt="Two-panel log-scale line chart of the actor gradient norm over actor-critic updates. The baseline's median is about 0.012; the actor-fix and motion-head runs sit about 3 times higher (medians 0.034 to 0.039); the reward-std and normalised-reward runs sit about 1.6 to 2 times higher (medians about 0.02 to 0.026); the two-hot runs are highest (medians 0.047 and 0.055), and the edge-head runs are close to them (0.041 and 0.031); the 32 x 32 run's median is 0.029." src="actor_gradient_norm_light.png">
 </picture>
 
 ## Overall conclusions
 
-1. **No change so far makes the CT-WM actor deliver within 137,680 steps.** All thirteen runs end at 0% delivery:
+1. **No change so far makes the CT-WM actor deliver within 137,680 steps.** All fourteen runs end at 0% delivery:
    baseline, 2 × actor fix, 2 × + reward std, 2 × + motion head, 2 × + normalised reward, 2 × + two-hot reward,
-   2 × + edge head.
+   2 × + edge head, 1 × + 32 × 32 stochastic state.
 2. **The imagination-scale hypothesis is rejected as the sole cause.** Up-weighting the RL term increases actor
    gradients ~3× but amplifies an uninformative signal (with slightly more out-of-bounds endings).
 3. **The learned reward-std head, in this form, is rejected and harmful.** It does not improve reward prediction,
@@ -782,17 +849,21 @@ motion head + two-hot reward, violet = the same + edge head. Seed 18 has no base
    - Even the posterior, which has just seen the exact position, is 30–60 m off, and the head's loss plateaus.
      The compact model's 8 × 8 stochastic state is the prime suspect.
    - Behaviour does not change beyond seed noise.
+10. **A 16× larger stochastic state (one-seed pilot) halves the position error again, to ~30 m, but endings stay
+    unforeseen.**
+    - The held-out ending probability is 0.068 (experiment 6: 0.088), and behaviour is unchanged.
+    - Precision gains of this size do not make out-of-bounds endings foreseeable. Since experiment 5 there is no
+      exploit left to fix.
 
-**Suggested next experiments** (not run; one variable each, on top of actor fix + motion head + two-hot reward +
-edge head):
+**Suggested next steps** (not run; these need a team decision):
 
-- **A larger stochastic state.** Go from 8 × 8 to the NRSM default of 32 × 32. Mechanism: the posterior's
-  nearest-edge error falls to a few metres, and held-out endings become foreseeable (ending probability ≥ 0.5).
-  Initial weights cannot be paired across shapes, so report the step-0 difference.
-- **A heavier edge head** (weight 10 instead of 1). This is a cheaper dose-response check, though the loss plateau
-  suggests capacity, not weighting, is the limit.
-- **Longer runs** of the best configuration, to see whether the small goal-directed progress grows into
-  pickups.
+- **Give CT-WM DreamerV2's learning signal:** the 64 demonstrations and the behaviour-cloning term that
+  DreamerV2's delivering runs use, and that the CT-WM contract (`no_bc`) excludes. This targets the sparse-reward
+  problem directly.
+- **Or keep the pure-RL contract, and run longer:** ≥ 3 seeds per condition on the GPU cluster, to see whether the
+  small goal-directed progress of experiments 5–6 grows into pickups.
+- **Analytic shaping in imagination.** Compute γΦ(s′) − Φ(s) from the motion head's predicted displacement,
+  projected onto the goal direction.
 - **Analytic shaping in imagination.** Compute γΦ(s′) − Φ(s) from the motion head's predicted displacement,
   projected onto the goal direction.
 - **Criteria for distributional reward heads** should score ending pricing (the slope above) and foreseeing
@@ -805,8 +876,8 @@ edge head):
 |---|---|
 | `run_ablation.py`, `ablation_patches.py` | Wrapper and runtime patches (the team's code is not modified) |
 | `*_ablation.json` | Per-run record of the changes and the wrapper/patch SHA-256 |
-| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*`, `imagscale1_delta_seed{17,18}_*`, `imagscale1_delta_rewardnorm_seed{17,18}_*`, `imagscale1_delta_twohot_seed{17,18}_*`, `imagscale1_delta_twohot_edge_seed{17,18}_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, motion check, terminal-reward check (experiments 3–6), ending check and edge check (experiments 3–6), `result.json`, `manifest.json` |
-| `*_ending_timeline.json` | The ending check at every checkpoint (experiments 3–6) |
+| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*`, `imagscale1_delta_seed{17,18}_*`, `imagscale1_delta_rewardnorm_seed{17,18}_*`, `imagscale1_delta_twohot_seed{17,18}_*`, `imagscale1_delta_twohot_edge_seed{17,18}_*`, `imagscale1_delta_twohot_edge_latent32_seed17_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, motion check, terminal-reward check (experiments 3–7), ending check and edge check (experiments 3–7), `result.json`, `manifest.json` |
+| `*_ending_timeline.json` | The ending check at every checkpoint (experiments 3–7) |
 | `progress_check.json` | Net progress toward the goal, all runs |
 | `baseline_reward_signal.json`, `baseline_delta_check.json` | Reward and motion checks on the first report's final checkpoint |
 | `sweep_world_model.py`, `reward_signal_check.py`, `delta_check.py`, `terminal_reward_check.py`, `ending_check.py`, `progress_check.py`, `edge_check.py`, `make_figures.py` | Analysis scripts (reproduce the files and figures) |
@@ -819,4 +890,5 @@ The git history records which script revision each set of runs used:
 - motion-head runs: wrapper `228d35d`, patches `ff40afa`;
 - normalised-reward runs: wrapper and patches `f032152`;
 - two-hot runs: wrapper and patches `eebe243`;
-- edge-head runs: wrapper and patches `2af097e`.
+- edge-head runs: wrapper and patches `2af097e`;
+- 32 × 32 pilot: wrapper and patches `5307c98`.

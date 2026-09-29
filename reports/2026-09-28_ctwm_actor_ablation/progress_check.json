@@ -336,5 +336,31 @@
       "progress_m": -157.54693589516737,
       "progress_se_m": 26.489511995730762
     }
+  },
+  "imagscale1_delta_twohot_edge_latent32_seed17": {
+    "policy_episodes": 1599,
+    "last_quarter": {
+      "episodes": 402,
+      "start_m": 963.1642780968206,
+      "end_m": 944.9923247531872,
+      "progress_m": 18.171953343633394,
+      "progress_se_m": 11.483773344964545
+    },
+    "timeout_share": 0.7412935323383084,
+    "oob_share": 0.25870646766169153,
+    "timeout": {
+      "episodes": 298,
+      "start_m": 969.4380592499804,
+      "end_m": 916.2928494447029,
+      "progress_m": 53.14520980527737,
+      "progress_se_m": 13.037561890162744
+    },
+    "oob": {
+      "episodes": 104,
+      "start_m": 945.1874821002667,
+      "end_m": 1027.2273597717285,
+      "progress_m": -82.03987767146184,
+      "progress_se_m": 21.181200439700113
+    }
   }
 }
