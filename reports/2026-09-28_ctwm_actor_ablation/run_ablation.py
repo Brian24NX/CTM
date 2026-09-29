@@ -10,6 +10,8 @@
                              mean taken in original units (see ablation_patches.py).
 - --edge-head W              adds W * (NLL of the distances to the four map edges, symlog-scaled) to the
                              world-model loss (see ablation_patches.py).
+- --stoch N --classes N      the compact world model's stochastic state becomes N categorical variables of N
+                             classes (compact default: 8 x 8); every other size stays compact.
 
 All other arguments go to the trainer unchanged. The trainer records the resolved ac_config in the run's
 manifest.json; this wrapper also writes <output>.ablation.json (the changes and this file's SHA-256) next to
@@ -28,7 +30,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 import ablation_patches  # noqa: F401  (puts the DV2 folder on sys.path)
-from ablation_patches import DELTA_KEY, DV2, EDGE_KEY, REWARD_NORM_KEY, REWARD_STD_KEY, REWARD_TWOHOT_KEY
+from ablation_patches import (CLASSES_KEY, DELTA_KEY, DV2, EDGE_KEY, REWARD_NORM_KEY, REWARD_STD_KEY,
+                              REWARD_TWOHOT_KEY, STOCH_KEY)
 
 import nrsm_online_agent  # noqa: E402
 import train_nrsm_online  # noqa: E402
@@ -42,6 +45,8 @@ def main():
     parser.add_argument('--normalised-reward', action='store_true')
     parser.add_argument('--twohot-reward', action='store_true')
     parser.add_argument('--edge-head', type=float, metavar='WEIGHT')
+    parser.add_argument('--stoch', type=int)
+    parser.add_argument('--classes', type=int)
     known, trainer_args = parser.parse_known_args()
     default = nrsm_online_agent.ACConfig()
     config = default
@@ -73,13 +78,21 @@ def main():
             or known.twohot_reward or known.edge_head is not None):
         ablation_patches.apply(known.learned_reward_std, known.delta_head, known.normalised_reward,
                                known.twohot_reward, known.edge_head)
+    core = None
+    if known.stoch is not None or known.classes is not None:
+        if min(x for x in (known.stoch, known.classes) if x is not None) < 1:
+            parser.error('--stoch and --classes must be positive')
+        compact, core = nrsm_online_agent.compact_config(), ablation_patches.core_config(known.stoch, known.classes)
+        for key, name in ((STOCH_KEY, 'stoch'), (CLASSES_KEY, 'classes')):
+            if getattr(core, name) != getattr(compact, name):
+                changed[key] = [getattr(compact, name), getattr(core, name)]
     if not changed:
         parser.error('Specify at least one ablation')
     base = nrsm_online_agent.OnlineAgent
 
     def agent_factory(core_config=None, ac_config=None):
         # Explicit configs (checkpoint-restore verification) pass through unchanged.
-        return base(core_config, ac_config or config)
+        return base(core_config or core, ac_config or config)
 
     train_nrsm_online.OnlineAgent = agent_factory
     output = Path(trainer_args[trainer_args.index('--output') + 1])

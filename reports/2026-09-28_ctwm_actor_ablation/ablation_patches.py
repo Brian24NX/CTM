@@ -33,9 +33,15 @@ x/y scales (~7.4 m), so the target keeps metre precision next to an edge and pro
 The loss adds edge_weight * (unit-variance Gaussian NLL) on every valid row. Like the motion head, it uses
 fixed-seed initialisers, so seed pairing holds.
 
+stoch / classes (experiment 7): the compact world model's stochastic state (8 categorical variables of 8 classes)
+is enlarged, e.g. to the NRSM default of 32 x 32; every other size stays compact. Layer shapes change, so initial
+weights cannot be paired with earlier runs. The trainer records the resulting core config in manifest.json, and
+agent_for_run() rebuilds each run from it.
+
 Training (run_ablation.py) and analysis scripts build agents through agent_for_run()/apply(), so a
 checkpoint is always loaded into the architecture that produced it.
 """
+import dataclasses
 import json
 import sys
 from pathlib import Path
@@ -51,6 +57,7 @@ from tensorflow_probability import distributions as tfd  # noqa: E402
 
 import models  # noqa: E402
 import nrsm_online_agent  # noqa: E402
+from nrsm import NRSMConfig  # noqa: E402
 import tools  # noqa: E402
 import validate_nrsm  # noqa: E402
 
@@ -73,6 +80,7 @@ EDGE_KEY = 'world_model.edge_head_weight'
 # Distances to the left, right, bottom and top edges, in units of one typical step on that axis (DELTA_SCALE x, y).
 EDGE_SCALE = (DELTA_SCALE[0], DELTA_SCALE[0], DELTA_SCALE[1], DELTA_SCALE[1])
 EDGE_SEED = 20260929
+STOCH_KEY, CLASSES_KEY = 'core_config.stoch', 'core_config.classes'
 _ORIGINAL_WORLD_LOSS = nrsm_online_agent.OnlineAgent.world_loss
 
 
@@ -294,17 +302,24 @@ def apply(learned_reward_std=None, delta_weight=None, reward_norm=False, reward_
         _world_loss_with_aux if (delta_weight or edge_weight) else _ORIGINAL_WORLD_LOSS)
 
 
+def core_config(stoch=None, classes=None):
+    """The compact core config, with the stochastic state's size replaced where given."""
+    compact = nrsm_online_agent.compact_config()
+    return dataclasses.replace(compact, stoch=int(stoch or compact.stoch), classes=int(classes or compact.classes))
+
+
 def run_changes(run_dir):
     sidecar = Path(run_dir).with_name(Path(run_dir).name + '.ablation.json')
     return json.loads(sidecar.read_text()).get('changed', {}) if sidecar.exists() else {}
 
 
 def agent_for_run(run_dir):
-    """Rebuild a run's exact agent (architecture, loss and ac_config) from its manifest and sidecar."""
+    """Rebuild a run's exact agent (architecture, core config, loss and ac_config) from its manifest and sidecar."""
     manifest = json.loads((Path(run_dir) / 'manifest.json').read_text())
     changes = run_changes(run_dir)
     apply(changes.get(REWARD_STD_KEY, [None, None])[1], changes.get(DELTA_KEY, [None, None])[1],
           bool(changes.get(REWARD_NORM_KEY, [False, False])[1]),
           bool(changes.get(REWARD_TWOHOT_KEY, [False, False])[1]),
           changes.get(EDGE_KEY, [None, None])[1])
-    return nrsm_online_agent.OnlineAgent(ac_config=nrsm_online_agent.ACConfig(**manifest['ac_config']))
+    return nrsm_online_agent.OnlineAgent(core_config=NRSMConfig(**manifest['core_config']),
+                                         ac_config=nrsm_online_agent.ACConfig(**manifest['ac_config']))

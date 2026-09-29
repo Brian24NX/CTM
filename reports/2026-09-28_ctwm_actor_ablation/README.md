@@ -672,6 +672,45 @@ the NRSM default of 32 × 32, keeping the edge head.
 - A larger model trains more slowly on the laptop CPU, and ≥ 3 seeds per condition are needed. This is where the
   school's GPU cluster would help.
 
+## Seventh experiment: larger stochastic state (pilot, one seed, pre-registered)
+
+_Written at 22:32 CDT, before launch._
+
+**Motivation (experiment 6).**
+- Even the posterior, which has just seen the exact position, places the drone only to within ~30–60 m of an
+  edge, and the edge head's loss plateaus.
+- The compact world model's stochastic state is 8 categorical variables of 8 classes. The NRSM default is 32 × 32.
+
+**Change.** The wrapper gains `--stoch` / `--classes`. The stochastic state becomes 32 × 32; every other size stays
+compact. This is the only change from experiment 6.
+- **Size:** world-model parameters grow from 0.47 M to 1.58 M, and actor + critic from 0.08 M to 0.33 M, because
+  their input feature grows from 192 to 1,152 dimensions.
+- **Speed:** a joint update takes 141 ms instead of 101 ms in a single-process benchmark.
+- **Pairing is not possible:** layer shapes change, so initial weights cannot be paired with experiment 6. A short
+  run's seed-17 step-0 evaluation is 0 / 0 / 100 / 0% (experiment 6: 0 / 5 / 70 / 30%).
+- **Provenance:** the trainer records the core config in `manifest.json`. `agent_for_run()` now rebuilds every run
+  from it; the configs of all earlier runs equal the compact default.
+- **A pilot:** one seed (17), 137,680 steps, run alone on the laptop, which also measures the wall-clock cost.
+
+**Criteria**, compared with experiment 6, seed 17:
+
+- **Mechanism A (primary):** at the 55 held-out out-of-bounds endings, the discount head's mean ending probability
+  is **≥ 0.5** (experiment 6: 0.088).
+- **Mechanism B (the capacity hypothesis):** on held-out rows within 50 m of an edge, the edge head's
+  nearest-edge distance *from the posterior* has a median error **≤ 10 m** (experiment 6: 60 m). The one-step
+  prior's error is reported as well (experiment 6: 81 m).
+- **Behaviour:** in the last quarter of policy episodes, final distance < 820 m **or** pickups ≥ 10%. It must also
+  be better than experiment 6 on both (924 m, 1.9%).
+- **Guardrails:**
+  - The 15-step open-loop vector RMSE is ≤ 1.1× experiment 6's (0.398).
+  - The motion head's held-out 1-step error stays ≤ 11 m.
+  - The median world-model gradient norm after 1,000 updates is ≤ 70.
+  - `ending_check.py` slope ≤ −0.4.
+- **Also reported:** wall-clock time and environment steps per hour. Experiment 6 took 77.9 min, with two runs in
+  parallel.
+- One seed without paired initial weights can show whether the mechanism appears. It cannot establish a
+  behavioural effect.
+
 ## Figures
 
 One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned
