@@ -27,6 +27,12 @@ p-weighted terminal outcome keeps its full penalty. Hidden layers match the team
 output layer is zero-initialised (DreamerV3 practice; uniform probabilities predict exactly REWARD_MU) by
 zeroing it after default creation, so the shared random stream, and hence seed pairing, is unchanged.
 
+edge_weight (experiment 6): an auxiliary head predicts, from the same posterior features as the other heads, the
+distance to each of the four map edges, as symlog(distance / one typical step). The steps are the motion head's
+x/y scales (~7.4 m), so the target keeps metre precision next to an edge and proportional precision farther away.
+The loss adds edge_weight * (unit-variance Gaussian NLL) on every valid row. Like the motion head, it uses
+fixed-seed initialisers, so seed pairing holds.
+
 Training (run_ablation.py) and analysis scripts build agents through agent_for_run()/apply(), so a
 checkpoint is always loaded into the architecture that produced it.
 """
@@ -63,6 +69,10 @@ DELTA_DIMS = (0, 1, 2, 3, 4)   # x, y, speed, sin(heading), cos(heading) of the 
 # baseline run, seed 17. Fixed constants, so the target scale never drifts during training.
 DELTA_SCALE = (0.00746, 0.00729, 0.07891, 0.28910, 0.27888)
 DELTA_CLIP = 10.0
+EDGE_KEY = 'world_model.edge_head_weight'
+# Distances to the left, right, bottom and top edges, in units of one typical step on that axis (DELTA_SCALE x, y).
+EDGE_SCALE = (DELTA_SCALE[0], DELTA_SCALE[0], DELTA_SCALE[1], DELTA_SCALE[1])
+EDGE_SEED = 20260929
 _ORIGINAL_WORLD_LOSS = nrsm_online_agent.OnlineAgent.world_loss
 
 
@@ -207,11 +217,28 @@ def delta_mask(data):
     return data['valid'][:, 1:] * (1. - data['is_first'][:, 1:]) * data['valid'][:, :-1]
 
 
-def world_model_class(learned_reward_std=None, delta_weight=None, reward_norm=False, reward_twohot=False):
+def edge_distances(vector):
+    """Distances [..., 4] to the left, right, bottom and top map edges, in normalised units (1 = 1000 m). The
+    observation clips x/y to [-1, 1], so the edge a drone has just crossed is at distance 0."""
+    x, y = vector[..., 0], vector[..., 1]
+    return tf.stack([x + 1., 1. - x, y + 1., 1. - y], -1)
+
+
+def edge_targets(vector):
+    return symlog(edge_distances(vector) / tf.constant(EDGE_SCALE, tf.float32))
+
+
+def edge_prediction(prediction):
+    """Invert edge_targets: predicted distances to the four edges in normalised units."""
+    return symexp(prediction) * tf.constant(EDGE_SCALE, tf.float32)
+
+
+def world_model_class(learned_reward_std=None, delta_weight=None, reward_norm=False, reward_twohot=False,
+                      edge_weight=None):
     base = validate_nrsm.DiagnosticWorldModel
     if sum(bool(x) for x in (learned_reward_std, reward_norm, reward_twohot)) > 1:
         raise ValueError('learned_reward_std, reward_norm and reward_twohot each replace the reward head')
-    if not learned_reward_std and not delta_weight and not reward_norm and not reward_twohot:
+    if not (learned_reward_std or delta_weight or reward_norm or reward_twohot or edge_weight):
         return base
 
     class AblationWorldModel(base):
@@ -229,28 +256,42 @@ def world_model_class(learned_reward_std=None, delta_weight=None, reward_norm=Fa
                 self.delta = MotionHead(len(DELTA_DIMS), layers=2, units=config.hidden)
                 # Create its variables now, before OnlineAgent builds the optimizer (seeded: no RNG shift).
                 self.delta(tf.zeros([1, config.stoch * config.classes + config.context]))
+            if edge_weight:
+                self.edge_weight = float(edge_weight)
+                self.edge = MotionHead(4, layers=2, units=config.hidden, seed=EDGE_SEED)
+                self.edge(tf.zeros([1, config.stoch * config.classes + config.context]))
 
         def delta_nll(self, feat, data):
             return tools.masked_mean(-self.delta(feat[:, 1:]).log_prob(delta_targets(data['vector'])),
                                      delta_mask(data))
 
+        def edge_nll(self, feat, data):
+            return tools.masked_mean(-self.edge(feat).log_prob(edge_targets(data['vector'])), data['valid'])
+
     return AblationWorldModel
 
 
-def _world_loss_with_delta(self, data):
-    """The team's world_loss, plus delta_weight * the delta-head NLL on the same posterior features."""
+def _world_loss_with_aux(self, data):
+    """The team's world_loss, plus weight * NLL of each auxiliary head (motion, edge) on the same posterior
+    features. With only the motion head, this is the same computation as experiments 3-5."""
     post, loss, metrics = _ORIGINAL_WORLD_LOSS(self, data)
-    delta_nll = self.world.delta_nll(self.world.core.get_feat(post), data)
-    loss = loss + self.world.delta_weight * delta_nll
-    return post, loss, dict(metrics, model_loss=loss, delta_nll=delta_nll)
+    feat = self.world.core.get_feat(post)
+    extra = {}
+    if getattr(self.world, 'delta_weight', None):
+        extra['delta_nll'] = self.world.delta_nll(feat, data)
+        loss = loss + self.world.delta_weight * extra['delta_nll']
+    if getattr(self.world, 'edge_weight', None):
+        extra['edge_nll'] = self.world.edge_nll(feat, data)
+        loss = loss + self.world.edge_weight * extra['edge_nll']
+    return post, loss, dict(metrics, model_loss=loss, **extra)
 
 
-def apply(learned_reward_std=None, delta_weight=None, reward_norm=False, reward_twohot=False):
+def apply(learned_reward_std=None, delta_weight=None, reward_norm=False, reward_twohot=False, edge_weight=None):
     """Every OnlineAgent built after this call uses the selected world model and loss."""
     nrsm_online_agent.DiagnosticWorldModel = world_model_class(
-        learned_reward_std, delta_weight, reward_norm, reward_twohot)
+        learned_reward_std, delta_weight, reward_norm, reward_twohot, edge_weight)
     nrsm_online_agent.OnlineAgent.world_loss = (
-        _world_loss_with_delta if delta_weight else _ORIGINAL_WORLD_LOSS)
+        _world_loss_with_aux if (delta_weight or edge_weight) else _ORIGINAL_WORLD_LOSS)
 
 
 def run_changes(run_dir):
@@ -264,5 +305,6 @@ def agent_for_run(run_dir):
     changes = run_changes(run_dir)
     apply(changes.get(REWARD_STD_KEY, [None, None])[1], changes.get(DELTA_KEY, [None, None])[1],
           bool(changes.get(REWARD_NORM_KEY, [False, False])[1]),
-          bool(changes.get(REWARD_TWOHOT_KEY, [False, False])[1]))
+          bool(changes.get(REWARD_TWOHOT_KEY, [False, False])[1]),
+          changes.get(EDGE_KEY, [None, None])[1])
     return nrsm_online_agent.OnlineAgent(ac_config=nrsm_online_agent.ACConfig(**manifest['ac_config']))

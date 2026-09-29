@@ -530,6 +530,70 @@ fail.**
   0.03–0.15.
 - Longer runs would show whether the small goal-directed progress grows into pickups.
 
+## Sixth experiment: edge-distance head (pre-registered)
+
+_Written at 20:54 CDT, before launch._
+
+**Motivation (experiment 5).**
+- No world model so far sees out-of-bounds endings coming.
+- The step before leaving the map, the drone is a median 2–3 m from the edge, and 25–35 m five steps before
+  (experiment 5's own flights).
+- Yet the latent's idea of its distance to the nearest edge is off by a median 129 / 137 m near the edges (below).
+- The map is 2,000 m square. A drone is out of bounds once either coordinate leaves [0, 2,000 m], and one step
+  moves up to 40 m.
+
+**Change.** `ablation_patches` gains an `edge_weight` option (`--edge-head 1.0`). This is the only change from
+experiment 5.
+- **Head.** An auxiliary head, with the motion head's network shape and its own fixed-seed initialisers, reads the
+  same posterior features as the other heads.
+- **Target.** It predicts the distance to each of the four map edges (left, right, bottom, top) as
+  symlog(distance / one typical step). The steps are the motion head's x/y scales (7.46 / 7.29 m).
+  - The target is 0 at the edge, 0.69 one step away, 2.4 at ~75 m and 4.9 at 1,000 m.
+  - So metres matter next to an edge. Farther away, the precision needed grows with the distance, which is what
+    foreseeing an edge within the 15-step imagination horizon requires.
+- **Loss.** 1.0 × a unit-variance Gaussian NLL, on every valid row.
+- **Why not the clipped nearest-edge target suggested above.**
+  - A clip at ~75 m would hide how far away a drone 120 m out is, which a 15-step imagination needs.
+  - The nearest-edge minimum also has kinks, and it loses which edge is near.
+- **Pairing, verified.** All other initial weights are bit-identical to experiment 5, and short runs reproduce the
+  step-0 evaluations: 0 / 5 / 70 / 30% (seed 17) and 0 / 5 / 0 / 100% (seed 18).
+- **No change to earlier configurations.** Runs without the edge head compute the same world loss as before,
+  bit-identical under the same random draws.
+- Seeds 17 and 18, 137,680 steps, compared seed-for-seed with experiment 5.
+
+**New check (`edge_check.py`).** It scores every run on the same fixed held-out set: the 200 random-policy episodes
+of `validate_nrsm.collect(400, 60000)`, which contain 55 out-of-bounds endings. It also scores the run's own last
+100 episodes. From the one-step prior it measures:
+- the discount head's ending probability at out-of-bounds endings;
+- the reward head's share of their penalty;
+- false alarms within 20 m of an edge;
+- the error of the predicted distance to the nearest edge on rows within 50 m of one.
+
+Baselines at the final checkpoints (seed 17 / seed 18):
+
+| Held-out set | Exp 3 | Exp 4 | Exp 5 |
+|---|---:|---:|---:|
+| Ending probability at out-of-bounds endings | 0.050 / 0.047 | 0.073 / 0.043 | 0.035 / 0.053 |
+| Predicted share of their penalty | 5% / 7% | 1% / 1% | 10% / 12% |
+| Ending probability within 20 m of an edge, no ending | 0.018 / 0.016 | 0.044 / 0.027 | 0.009 / 0.033 |
+| Nearest-edge distance error within 50 m of an edge (vector head, median) | 69 / 130 m | 117 / 90 m | 129 / 137 m |
+
+**Criteria**, compared with experiment 5 on the same seed:
+
+- **Mechanism A (primary):** at the held-out set's 55 out-of-bounds endings, the discount head's mean ending
+  probability is **≥ 0.5** (experiment 5: 0.035 / 0.053).
+- **Mechanism B:** on held-out rows within 50 m of an edge, the edge head's nearest-edge distance has a median
+  error **≤ 10 m** (experiment 5's vector head: 129 / 137 m).
+- **Behaviour:** in the last quarter of policy episodes, final distance < 820 m **or** pickups ≥ 10%. It must also
+  be better than experiment 5 on the same seed on both (896 m, 2.0% / 976 m, 1.0%).
+  - Also reported: the out-of-bounds rate (18% / 34%), net progress toward the goal (+69 / −44 m), deterministic
+    delivery, and the held-out penalty share.
+- **Guardrails:**
+  - The 15-step open-loop vector RMSE is ≤ 1.1× experiment 5's (0.390 / 0.456).
+  - The motion head's held-out 1-step error stays ≤ 11 m.
+  - The median world-model gradient norm after 1,000 updates is ≤ 70.
+  - The reward and discount heads keep agreeing: `ending_check.py` slope ≤ −0.4 (experiment 5: −0.63 / −0.57).
+
 ## Figures
 
 One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned

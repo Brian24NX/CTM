@@ -8,6 +8,8 @@
 - --normalised-reward        the reward head predicts symlog((r - mu) / sigma) (see ablation_patches.py).
 - --twohot-reward            the reward head is a two-hot categorical over normalised symlog bins, with its
                              mean taken in original units (see ablation_patches.py).
+- --edge-head W              adds W * (NLL of the distances to the four map edges, symlog-scaled) to the
+                             world-model loss (see ablation_patches.py).
 
 All other arguments go to the trainer unchanged. The trainer records the resolved ac_config in the run's
 manifest.json; this wrapper also writes <output>.ablation.json (the changes and this file's SHA-256) next to
@@ -26,7 +28,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import ablation_patches  # noqa: F401  (puts the DV2 folder on sys.path)
-from ablation_patches import DELTA_KEY, DV2, REWARD_NORM_KEY, REWARD_STD_KEY, REWARD_TWOHOT_KEY
+from ablation_patches import DELTA_KEY, DV2, EDGE_KEY, REWARD_NORM_KEY, REWARD_STD_KEY, REWARD_TWOHOT_KEY
 
 import nrsm_online_agent  # noqa: E402
 import train_nrsm_online  # noqa: E402
@@ -39,6 +41,7 @@ def main():
     parser.add_argument('--delta-head', type=float, metavar='WEIGHT')
     parser.add_argument('--normalised-reward', action='store_true')
     parser.add_argument('--twohot-reward', action='store_true')
+    parser.add_argument('--edge-head', type=float, metavar='WEIGHT')
     known, trainer_args = parser.parse_known_args()
     default = nrsm_online_agent.ACConfig()
     config = default
@@ -62,10 +65,14 @@ def main():
         if known.learned_reward_std is not None or known.normalised_reward:
             parser.error('--twohot-reward cannot be combined with another reward-head change')
         changed[REWARD_TWOHOT_KEY] = [False, True]
+    if known.edge_head is not None:
+        if known.edge_head <= 0:
+            parser.error('--edge-head must be positive')
+        changed[EDGE_KEY] = [None, known.edge_head]
     if (known.learned_reward_std is not None or known.delta_head is not None or known.normalised_reward
-            or known.twohot_reward):
+            or known.twohot_reward or known.edge_head is not None):
         ablation_patches.apply(known.learned_reward_std, known.delta_head, known.normalised_reward,
-                               known.twohot_reward)
+                               known.twohot_reward, known.edge_head)
     if not changed:
         parser.error('Specify at least one ablation')
     base = nrsm_online_agent.OnlineAgent
