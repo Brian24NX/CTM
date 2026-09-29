@@ -38,6 +38,18 @@ is enlarged, e.g. to the NRSM default of 32 x 32; every other size stays compact
 weights cannot be paired with earlier runs. The trainer records the resulting core config in manifest.json, and
 agent_for_run() rebuilds each run from it.
 
+demonstrations (experiment 8): DreamerV2's learning signal from dreamer.py, added to CT-WM's online training:
+- the same 64 controller demonstrations (demo_episodes, demo_seed_start = 30000; every one a delivery), built in
+  the CT-WM trainer's own replay format;
+- the world model trains on them as if they were pinned in a full 500-episode replay: each batch slot is a
+  random demonstration with probability 64 / 564;
+- the actor loss gains DreamerV2's behaviour-cloning term, actor_bc_scale (5) * dreamer.behavior_cloning_loss on
+  a batch of demonstrations. The actor reads the posterior features of the demonstration states, as it does when
+  it acts, paired with the next action (dreamer.align_behavior_supervision).
+The update is the team's OnlineAgent.update with that one term added. With the term and the mixing switched off,
+it reproduces the original update exactly. Architecture and initial weights are unchanged, so seed pairing holds.
+Not included: DreamerV2's 3,000-update behaviour-cloning warm start and its event-prioritised replay.
+
 Training (run_ablation.py) and analysis scripts build agents through agent_for_run()/apply(), so a
 checkpoint is always loaded into the architecture that produced it.
 """
@@ -81,6 +93,14 @@ EDGE_KEY = 'world_model.edge_head_weight'
 EDGE_SCALE = (DELTA_SCALE[0], DELTA_SCALE[0], DELTA_SCALE[1], DELTA_SCALE[1])
 EDGE_SEED = 20260929
 STOCH_KEY, CLASSES_KEY = 'core_config.stoch', 'core_config.classes'
+DEMO_KEY = 'training.dreamerv2_demonstrations'
+# dreamer.py defaults: demo_episodes, demo_seed_start, actor_bc_scale. The world-model share treats the demos as
+# pinned in the trainer's full 500-episode FIFO replay (uniform sampling).
+DEMO_EPISODES, DEMO_SEED_START, BC_SCALE = 64, 30_000, 5.0
+DEMO_SHARE = DEMO_EPISODES / (DEMO_EPISODES + 500)
+DEMO_RNG_SEED = 20260930
+_ORIGINAL_UPDATE = nrsm_online_agent.OnlineAgent.update
+_DEMOS = dict(episodes=None, rng=None)
 _ORIGINAL_WORLD_LOSS = nrsm_online_agent.OnlineAgent.world_loss
 
 
@@ -241,6 +261,105 @@ def edge_prediction(prediction):
     return symexp(prediction) * tf.constant(EDGE_SCALE, tf.float32)
 
 
+def controller_demonstrations(count=DEMO_EPISODES, seed_start=DEMO_SEED_START):
+    """dreamer.collect_controller_demonstrations (the controller on seeds 30000-30063, each a delivery), in the
+    CT-WM trainer's replay format (train_nrsm_online.environment / new_episode / add_transition)."""
+    import train_nrsm_online as trainer
+    from controller_baseline import controller_action
+    episodes = []
+    for seed in range(seed_start, seed_start + count):
+        env = trainer.environment(seed)
+        try:
+            obs = env.reset()
+            episode, done = trainer.new_episode(obs), False
+            for t in range(1, 101):
+                action = np.asarray(controller_action(env), np.float32)
+                obs, reward, done, info = env.step(action)
+                trainer.add_transition(episode, t, action, obs, reward, info)
+                if done:
+                    break
+        finally:
+            env.close()
+        if not (done and bool(obs['is_success'])):
+            raise RuntimeError(f'Controller demonstration failed for seed {seed}')
+        episodes.append(episode)
+    return episodes
+
+
+def _mix_demonstrations(data):
+    """Each world-model batch slot becomes a random demonstration with probability DEMO_SHARE."""
+    arrays = {k: np.array(v) for k, v in data.items()}
+    episodes, rng = _DEMOS['episodes'], _DEMOS['rng']
+    for slot in range(arrays['valid'].shape[0]):
+        if rng.random() < DEMO_SHARE:
+            demo = episodes[rng.integers(len(episodes))]
+            for key in arrays:
+                arrays[key][slot] = demo[key]
+    return {k: tf.constant(v) for k, v in arrays.items()}
+
+
+def _demonstration_batch(size):
+    episodes, rng = _DEMOS['episodes'], _DEMOS['rng']
+    picks = rng.integers(len(episodes), size=size)
+    return {k: tf.constant(np.stack([episodes[i][k] for i in picks])) for k in episodes[0]}
+
+
+@tf.function(reduce_retracing=True)
+def _update_graph(self, data, demo, world_only=False):
+    """nrsm_online_agent.OnlineAgent.update, plus BC_SCALE * behaviour cloning on the demonstration batch."""
+    from dreamer import align_behavior_supervision, behavior_cloning_loss
+    with tf.GradientTape() as tape:
+        post, loss, metrics = self.world_loss(data)
+    wg, wn = self.checked_gradients(tape, loss, self.world.trainable_variables, 'world')
+    if world_only:
+        self.model_opt.apply_gradients(zip(wg, self.world.trainable_variables))
+    else:
+        starts, _ = self.select_starts(post, data)
+        if BC_SCALE:   # decided when the graph is built; with BC_SCALE = 0 the graph is the original one
+            # Posterior features of the demonstration states (deterministic: no random draws), paired with the
+            # action that followed each state. The reset row carries no demonstrated action.
+            demo_post, *_ = self.world.forward(demo, False)
+            demo_feat = tf.stop_gradient(self.world.core.get_feat(demo_post))
+            demonstration = demo['valid'] * (1. - demo['is_first'])
+            bc_input, bc_action, bc_weight = align_behavior_supervision(
+                demo_feat, models.canonical_action(demo['action']), demonstration, demo['valid'])
+        with tf.GradientTape() as actor_tape:
+            actor_loss, source, returns, weights, actor_metrics = self.actor_objective(starts)
+            if BC_SCALE:
+                bc_loss = behavior_cloning_loss(self.actor(bc_input), tf.stop_gradient(bc_action), bc_weight)
+                total_actor_loss = actor_loss + BC_SCALE * bc_loss
+            else:
+                bc_loss, total_actor_loss = tf.constant(0.), actor_loss
+        ag, an = self.checked_gradients(actor_tape, total_actor_loss, self.actor.trainable_variables, 'actor')
+        with tf.GradientTape() as critic_tape:
+            critic_loss = -tools.masked_mean(self.critic(tf.stop_gradient(source)).log_prob(
+                tf.stop_gradient(returns)), weights)
+        cg, cn = self.checked_gradients(critic_tape, critic_loss, self.critic.trainable_variables, 'critic')
+        with tf.control_dependencies(wg + ag + cg):
+            self.model_opt.apply_gradients(zip(wg, self.world.trainable_variables))
+            self.actor_opt.apply_gradients(zip(ag, self.actor.trainable_variables))
+            self.critic_opt.apply_gradients(zip(cg, self.critic.trainable_variables))
+            self.ac_updates.assign_add(1)
+        if tf.equal(self.ac_updates % self.c.slow_update, 0):
+            self.copy_target()
+        # actor_loss keeps its meaning from earlier runs (the imagination part); the BC term is logged separately.
+        metrics.update(actor_metrics, actor_bc_loss=bc_loss, critic_loss=critic_loss,
+                       actor_gradient_norm=an, critic_gradient_norm=cn)
+    for group in (self.world.variables, self.actor.variables, self.critic.variables,
+                  self.slow_critic.variables):
+        for var in group:
+            if tf.as_dtype(var.dtype).is_floating:
+                tf.debugging.assert_all_finite(var, 'Non-finite parameter after update')
+    metrics['model_gradient_norm'] = wn
+    return metrics
+
+
+def _update_with_demonstrations(self, data, world_only=False):
+    data = _mix_demonstrations(data)
+    demo = data if world_only else _demonstration_batch(int(data['valid'].shape[0]))   # unused when world_only
+    return _update_graph(self, data, demo, world_only)
+
+
 def world_model_class(learned_reward_std=None, delta_weight=None, reward_norm=False, reward_twohot=False,
                       edge_weight=None):
     base = validate_nrsm.DiagnosticWorldModel
@@ -294,12 +413,21 @@ def _world_loss_with_aux(self, data):
     return post, loss, dict(metrics, model_loss=loss, **extra)
 
 
-def apply(learned_reward_std=None, delta_weight=None, reward_norm=False, reward_twohot=False, edge_weight=None):
-    """Every OnlineAgent built after this call uses the selected world model and loss."""
+def apply(learned_reward_std=None, delta_weight=None, reward_norm=False, reward_twohot=False, edge_weight=None,
+          demo_seed=None):
+    """Every OnlineAgent built after this call uses the selected world model and loss. With demo_seed, updates
+    also train on the demonstrations (experiment 8), with their own random stream seeded by the run seed."""
     nrsm_online_agent.DiagnosticWorldModel = world_model_class(
         learned_reward_std, delta_weight, reward_norm, reward_twohot, edge_weight)
     nrsm_online_agent.OnlineAgent.world_loss = (
         _world_loss_with_aux if (delta_weight or edge_weight) else _ORIGINAL_WORLD_LOSS)
+    if demo_seed is None:
+        nrsm_online_agent.OnlineAgent.update = _ORIGINAL_UPDATE
+    else:
+        if _DEMOS['episodes'] is None:
+            _DEMOS['episodes'] = controller_demonstrations()
+        _DEMOS['rng'] = np.random.default_rng([DEMO_RNG_SEED, int(demo_seed)])
+        nrsm_online_agent.OnlineAgent.update = _update_with_demonstrations
 
 
 def core_config(stoch=None, classes=None):
@@ -314,7 +442,8 @@ def run_changes(run_dir):
 
 
 def agent_for_run(run_dir):
-    """Rebuild a run's exact agent (architecture, core config, loss and ac_config) from its manifest and sidecar."""
+    """Rebuild a run's exact agent (architecture, core config, loss and ac_config) from its manifest and sidecar.
+    Demonstrations change only training updates, not the architecture, so evaluation needs no demo data."""
     manifest = json.loads((Path(run_dir) / 'manifest.json').read_text())
     changes = run_changes(run_dir)
     apply(changes.get(REWARD_STD_KEY, [None, None])[1], changes.get(DELTA_KEY, [None, None])[1],

@@ -15,7 +15,7 @@ from pathlib import Path
 
 TRAIN_KEYS = ('model_loss', 'vector_nll', 'reward_nll', 'discount_bce', 'kl', 'actor_loss',
               'critic_loss', 'imagined_return', 'imagined_discount', 'model_gradient_norm',
-              'actor_gradient_norm', 'critic_gradient_norm', 'delta_nll', 'edge_nll')
+              'actor_gradient_norm', 'critic_gradient_norm', 'delta_nll', 'edge_nll', 'actor_bc_loss')
 EPISODE_KEYS = ('scene', 'success', 'pickup', 'timeout', 'oob', 'length', 'return_')
 
 

@@ -777,6 +777,71 @@ foreseeable, and behaviour is unchanged.**
     problem directly;
   - or keep the pure-RL contract and run many longer seeds, where the GPU cluster would pay off.
 
+## Eighth experiment: DreamerV2's demonstrations and behaviour cloning (pre-registered)
+
+_Written at 16:36 CDT on 2026-09-29, before launch. The team chose this option._
+
+**Motivation.**
+- DreamerV2's runs that deliver (16–39% of fixed scenes) learn from 64 controller demonstrations and a
+  behaviour-cloning term. `dreamer.py` says they break a "sparse-reward deadlock".
+- The CT-WM contract excludes both (`no_bc`), and none of its 14 runs has delivered.
+- The world model has never seen a delivery. At the demonstrations' deliveries, experiment 6 predicts −2% / −6%
+  of the +1 reward (below).
+
+**Change.** `ablation_patches` gains `demonstrations` (`--demonstrations`): DreamerV2's learning signal from
+`dreamer.py`, on top of experiment 6 (actor fix + motion head + two-hot reward + edge head).
+- **Data.** The same 64 controller demonstrations: `demo_episodes`, `demo_seed_start` = 30000. All are deliveries,
+  34–81 steps long, built in the CT-WM trainer's own replay format.
+- **World model.** It trains on them as if they were pinned in the trainer's full 500-episode replay: each batch
+  slot is a random demonstration with probability 64 / 564 (11.3%).
+- **Actor.** Its loss gains DreamerV2's cloning term, `actor_bc_scale` (5) × `dreamer.behavior_cloning_loss`, on a
+  batch of 2 demonstrations per update.
+  - The actor reads the posterior features of each demonstrated state, as it does when it acts, and is paired
+    with the controller's next action (`dreamer.align_behavior_supervision`).
+- **Actor objective.** The imagination term returns to 0.1, DreamerV2's value and CT-WM's default.
+  - Experiment 1 raised it to 1.0 because nothing else trained the actor; with cloning, this is DreamerV2's own
+    balance of the two terms.
+  - So, relative to experiment 6, the actor's objective becomes DreamerV2's.
+- **Implementation.** The update is the team's `OnlineAgent.update` with the cloning term added. With cloning and
+  mixing switched off, it reproduces the original update bit for bit over 7 updates.
+- **Pairing.** Architecture and initial weights are unchanged. Short runs reproduce experiment 6's step-0
+  evaluations exactly: 0 / 5 / 70 / 30% (seed 17) and 0 / 5 / 0 / 100% (seed 18).
+- **Not included from DreamerV2:**
+  - its 3,000-update cloning warm start;
+  - its event-prioritised replay;
+  - its exact-vector actor input. CT-WM's actor reads the latent, by design.
+- Seeds 17 and 18, 137,680 steps, compared seed-for-seed with experiment 6.
+
+**New check (`demo_check.py`).** It runs on the 64 demonstrations:
+- **Delivery:** the reward predicted at the delivery step from the one-step prior, as a share of the actual +1.
+- **Imitation:** how often the actor's deterministic MOVE/TURN choice matches the controller's.
+  - The controller moves on 93% of steps, so the criterion uses balanced agreement: the mean of the agreement on
+    MOVE steps and on TURN steps. Any constant choice scores 0.5.
+  - A 54-update smoke run had already learned "always MOVE" (93% agreement, balanced 0.5).
+- These are in-sample checks: they show whether the model and actor learned the demonstrations. The behaviour
+  criteria test new scenes.
+
+Baselines at experiment 6's final checkpoints (seed 17 / seed 18):
+
+| On the 64 demonstrations | Exp 6 |
+|---|---:|
+| Predicted share of the delivery reward | −2% / −6% |
+| Balanced MOVE/TURN agreement (0.5 = constant choice) | 0.44 / 0.59 |
+| Parameter error for the demonstrated branch (mean absolute) | 0.76 / 0.78 |
+
+**Criteria**, compared with experiment 6 on the same seed:
+
+- **Behaviour A (primary):** the final deterministic evaluation delivers in **≥ 10%** of the 50 fresh scenes. Every
+  earlier run: 0%. The 20 fixed scenes are reported too.
+- **Behaviour B:** in the last quarter of policy episodes, pickups ≥ 10% **or** final distance < 820 m (experiment 6:
+  1.9%, 924 m / 1.5%, 932 m). The delivery rate is reported as well.
+- **Mechanism A (world model):** at the demonstrations' deliveries, the predicted reward is **≥ 50%** of the actual.
+- **Mechanism B (actor):** balanced MOVE/TURN agreement on demonstrated steps is **≥ 0.8**.
+- **Guardrails:**
+  - The 15-step open-loop vector RMSE is ≤ 1.1× experiment 6's (0.398 / 0.454).
+  - The motion head's held-out 1-step error stays ≤ 11 m.
+  - The median world-model gradient norm after 1,000 updates is ≤ 70.
+
 ## Figures
 
 One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned
