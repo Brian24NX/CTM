@@ -942,6 +942,63 @@ change.
   - The motion head's held-out 1-step error stays ≤ 11 m.
   - The median world-model gradient norm after 1,000 updates is ≤ 70.
 
+## Results: experiment 9, imitation-only control
+
+Both runs completed exactly 137,680 steps (~94 min each, two in parallel), and checkpoint restore was verified.
+Their step-0 evaluations reproduced experiment 8 exactly.
+
+**Verdict against the pre-registered criteria:**
+
+| Criterion | Seed 17 | Seed 18 | Verdict |
+|---|---:|---:|---|
+| **Primary:** last-quarter pickups, control vs exp 8 (28.2% / 42.8%) | 23.2% (−5.0 points) | 29.3% (−13.5 points) | **Inconclusive** by the rule: ≥ 10 points lower on seed 18 only |
+| **Sanity:** balanced MOVE/TURN agreement ≥ 0.8 | 0.96 | 0.95 | ✅ Pass |
+| **Guardrail:** 15-step open-loop RMSE ≤ 1.1× exp 8 (0.343 / 0.358) | 0.361 | 0.356 | ✅ Pass |
+| **Guardrail:** motion head ≤ 11 m; median world-model gradient ≤ 70 | 2.1 m, 26.5 | 1.6 m, 28.9 | ✅ Pass |
+
+(Binomial standard error of each last-quarter pickup rate: ~2 points.)
+
+**Imitation alone accounts for most of experiment 8's improvement. Reinforcement learning adds a smaller increment,
+lower on both seeds without it, but past the pre-registered 10-point bar on only one.**
+
+| | Exp 8, seed 17 | Imitation only, seed 17 | Exp 8, seed 18 | Imitation only, seed 18 |
+|---|---:|---:|---:|---:|
+| Last-quarter pickups | 28.2% | 23.2% | 42.8% | 29.3% |
+| Last-quarter deliveries | 3.7% | 2.1% | 6.1% | 2.7% |
+| Deliveries during training | 21 | 15 | 39 | 17 |
+| Final distance to active goal | 455 m | 516 m | 427 m | 451 m |
+| Net progress toward the goal | +510 m | +450 m | +504 m | +494 m |
+| Out of bounds | 22% | 29% | 12% | 18% |
+| Deterministic, fresh scenes: delivery / pickup | 6 / 38% | 6 / 24% | 10 / 54% | 8 / 36% |
+| Deterministic, fixed scenes: delivery / pickup | 5 / 35% | 5 / 20% | 5 / 35% | 5 / 45% |
+| Delivery reward predicted at the demonstrations' deliveries | 48% | 31% | 65% | 53% |
+
+- **Against experiment 6** (no demonstrations: ~2% pickups, 0 deliveries, ~0 m progress), imitation alone
+  produces most of the gain: 23–29% pickups, 6–8% fresh-scene deliveries and +450–494 m of progress.
+- **With reinforcement learning on top, every training measure is better on both seeds:** pickups, deliveries,
+  distance and out-of-bounds rate. For example, last-quarter pickups rise by 5 and 14 points, and deliveries during
+  training are 1.4× and 2.3× higher.
+- **The deterministic tests are mixed:**
+  - fresh-scene pickups are higher on both seeds (+14 and +18 points);
+  - deliveries are similar (5–10% either way);
+  - fixed-scene pickups favour the control on seed 18 (45% vs 35%).
+- **Seed 17 is close.** Over the run, experiment 8 is ahead through the middle of training, but the control ends
+  slightly higher on the last rolling window (29% vs 23%).
+- **The imitation-only actor fits the demonstrations more tightly** (final cloning loss 0.05 vs 0.10–0.13), with the
+  same balanced agreement. Its world model predicts less of the delivery reward (31% / 53% vs 48% / 65%),
+  plausibly because its own flights deliver less often.
+
+**Interpretation.**
+- In experiment 8 the actor's objective weights imagination 0.1 against cloning 5, DreamerV2's balance. At that
+  weight, reinforcement learning is a modest correction on top of imitation.
+- It consistently points in the useful direction, but two seeds cannot pin down its size.
+
+**Next steps (not run).**
+- **Cloning with a heavier imagination term** (e.g. 1.0 instead of 0.1). This tests whether reinforcement learning
+  can add more once imitation has done the rest.
+- **Longer runs with ≥ 3 seeds** of experiment 8 and this control. That would settle the size of the reinforcement
+  learning contribution, and it is a good first job for the GPU cluster.
+
 ## Figures
 
 One panel per seed. Colour follows the condition: blue = baseline, orange = actor fix, aqua = actor fix + learned
@@ -978,6 +1035,19 @@ in its tables. Seed 18 has no baseline run.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="actor_gradient_norm_dark.png">
   <img alt="Two-panel log-scale line chart of the actor gradient norm over actor-critic updates. The baseline's median is about 0.012; the actor-fix and motion-head runs sit about 3 times higher (medians 0.034 to 0.039); the reward-std and normalised-reward runs sit about 1.6 to 2 times higher (medians about 0.02 to 0.026); the two-hot runs are highest (medians 0.047 and 0.055), and the edge-head runs are close to them (0.041 and 0.031). The demonstration runs sit about 100 times higher still (medians 4.6 and 4.9), because the behaviour-cloning term dominates their actor loss; they stay far below the clip of 100." src="actor_gradient_norm_light.png">
+</picture>
+
+Experiment 8 against its imitation-only control (experiment 9): red = imitation + reinforcement learning, blue =
+imitation only.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="imitation_control_pickup_rate_dark.png">
+  <img alt="Two-panel line chart of the rolling pickup rate in training episodes for experiment 8 and its imitation-only control. Both rise from about 5% to far above the other conditions. On seed 18 experiment 8 is clearly ahead from about 80,000 steps and ends near 44% against 36%. On seed 17 experiment 8 leads through the middle of training (peak 38% near 102,000 steps), but the control ends slightly higher on the last window, 29% against 23%." src="imitation_control_pickup_rate_light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="imitation_control_delivery_rate_dark.png">
+  <img alt="Two-panel line chart of the rolling delivery rate in training episodes for experiment 8 and its imitation-only control. Both start delivering regularly after about 100,000 steps. Experiment 8 ends near 5% (seed 17) and 7% (seed 18, peak 9%); the control ends near 4% and 5%." src="imitation_control_delivery_rate_light.png">
 </picture>
 
 ## Overall conclusions
@@ -1036,15 +1106,22 @@ in its tables. Seed 18 has no baseline run.
     - It is still far below the controller and DreamerV2's best runs, and still improving when training ended.
     - Pre-registered: behaviour B, imitation and all guardrails pass; the primary delivery bar and the
       delivery-reward check pass on one seed of two.
+12. **Most of that gain is imitation; reinforcement learning adds a smaller increment.**
+    - With the imagination term switched off (experiment 9), the drone still picks up 23–29% of the time in late
+      training, and delivers in 6–8% of fresh scenes.
+    - Reinforcement learning on top raises every training measure on both seeds, e.g. pickups by 5 and 14 points.
+    - Pre-registered: inconclusive, because the 10-point bar is met on seed 18 only.
 
 **Suggested next steps** (not run):
 
-- **Longer runs of experiment 8's configuration, with ≥ 3 seeds per condition.** Performance was still rising at the
-  end; this is the natural first job for the GPU cluster.
-- **Separate the three parts of experiment 8:**
+- **Longer runs of experiments 8 and 9, with ≥ 3 seeds per condition.** Performance was still rising at the end,
+  and more seeds would settle the size of the reinforcement-learning contribution. This is the natural first job
+  for the GPU cluster.
+- **Cloning with a heavier imagination term** (1.0 instead of DreamerV2's 0.1): can reinforcement learning add more
+  on top of imitation?
+- **Separate the other parts of experiment 8:**
   - cloning without demonstrations in world-model training;
-  - demonstrations in the world model without cloning;
-  - an imitation-only control (imagination scale 0), to measure what reinforcement learning adds.
+  - demonstrations in the world model without cloning.
 - **Close the rest of the gap to DreamerV2's recipe:** its cloning warm start and its event-prioritised replay.
 - **Criteria for distributional reward heads** should score ending pricing (the slope above) and foreseeing
   endings separately, and score ordinary steps on the no-ending prediction.
@@ -1056,12 +1133,12 @@ in its tables. Seed 18 has no baseline run.
 |---|---|
 | `run_ablation.py`, `ablation_patches.py` | Wrapper and runtime patches (the team's code is not modified) |
 | `*_ablation.json` | Per-run record of the changes and the wrapper/patch SHA-256 |
-| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*`, `imagscale1_delta_seed{17,18}_*`, `imagscale1_delta_rewardnorm_seed{17,18}_*`, `imagscale1_delta_twohot_seed{17,18}_*`, `imagscale1_delta_twohot_edge_seed{17,18}_*`, `imagscale1_delta_twohot_edge_latent32_seed17_*`, `imagscale01_delta_twohot_edge_demo_seed{17,18}_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, motion check, terminal-reward check (experiments 3–8), ending check and edge check (experiments 3–8), demonstration check (experiments 6 and 8), `result.json`, `manifest.json` |
-| `*_ending_timeline.json` | The ending check at every checkpoint (experiments 3–8) |
+| `imagscale1_seed{17,18}_*`, `imagscale1_rewardstd_seed{17,18}_*`, `imagscale1_delta_seed{17,18}_*`, `imagscale1_delta_rewardnorm_seed{17,18}_*`, `imagscale1_delta_twohot_seed{17,18}_*`, `imagscale1_delta_twohot_edge_seed{17,18}_*`, `imagscale1_delta_twohot_edge_latent32_seed17_*`, `imagscale01_delta_twohot_edge_demo_seed{17,18}_*`, `imagscale0_delta_twohot_edge_demo_seed{17,18}_*` | Per-run evaluations, training log, episodes, action stats, world-model sweep, reward check, motion check, terminal-reward check (experiments 3–9), ending check and edge check (experiments 3–9), demonstration check (experiments 6, 8 and 9), `result.json`, `manifest.json` |
+| `*_ending_timeline.json` | The ending check at every checkpoint (experiments 3–9) |
 | `progress_check.json` | Net progress toward the goal, all runs |
 | `baseline_reward_signal.json`, `baseline_delta_check.json` | Reward and motion checks on the first report's final checkpoint |
 | `sweep_world_model.py`, `reward_signal_check.py`, `delta_check.py`, `terminal_reward_check.py`, `ending_check.py`, `progress_check.py`, `edge_check.py`, `demo_check.py`, `make_figures.py` | Analysis scripts (reproduce the files and figures) |
-| `*_light.png`, `*_dark.png` | Comparison figures |
+| `*_light.png`, `*_dark.png` | Comparison figures (`imitation_control_*`: experiment 8 vs 9) |
 
 The git history records which script revision each set of runs used:
 
@@ -1072,4 +1149,5 @@ The git history records which script revision each set of runs used:
 - two-hot runs: wrapper and patches `eebe243`;
 - edge-head runs: wrapper and patches `2af097e`;
 - 32 × 32 pilot: wrapper and patches `5307c98`;
-- demonstration runs: wrapper and patches `47782b7`.
+- demonstration runs: wrapper and patches `47782b7`;
+- imitation-only control: the same wrapper and patches (`47782b7`), pre-registered in `a362a92`.

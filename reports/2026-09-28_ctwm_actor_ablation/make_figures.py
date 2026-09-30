@@ -45,6 +45,13 @@ RUNS = [  # (condition index, seed, folder, file prefix)
 ]
 SEEDS = (17, 18)
 WINDOW = 100
+# Focus figures, experiment 8 against its imitation-only control (experiment 9). Experiment 8 keeps its colour
+# from the main figures; the pair (red, blue) validates all-pairs in both modes.
+FOCUS = dict(series=dict(light=['#e34948', '#2a78d6'], dark=['#e66767', '#3987e5']),
+             labels=['Imitation + reinforcement learning (exp 8)', 'Imitation only (exp 9)'],
+             short=['exp 8', 'imitation only'],
+             runs=[(0, 17, 'imagscale01_delta_twohot_edge_demo_seed17'), (0, 18, 'imagscale01_delta_twohot_edge_demo_seed18'),
+                   (1, 17, 'imagscale0_delta_twohot_edge_demo_seed17'), (1, 18, 'imagscale0_delta_twohot_edge_demo_seed18')])
 
 
 def rows(folder, prefix, name):
@@ -72,10 +79,10 @@ def style(ax, t):
     ax.set_axisbelow(True)
 
 
-def panels(t, title, subtitle, xlabel, ylabel, log=False):
+def panels(t, title, subtitle, xlabel, ylabel, log=False, top=0.63):
     fig, axes = plt.subplots(1, 2, figsize=(7.8, 4.3), dpi=DPI, sharey=True)
     fig.patch.set_facecolor(t['surface'])
-    fig.subplots_adjust(left=0.1, right=0.98, top=0.63, bottom=0.13, wspace=0.08)
+    fig.subplots_adjust(left=0.1, right=0.98, top=top, bottom=0.13, wspace=0.08)
     fig.text(0.012, 0.965, title, color=t['ink'], fontsize=11.5, fontweight='bold', va='top')
     fig.text(0.012, 0.905, subtitle, color=t['ink2'], fontsize=8.5, va='top')
     for ax, seed in zip(axes, SEEDS):
@@ -101,23 +108,23 @@ def x_room(ax, data_max, tick_step):
     ax.set_xticks(np.arange(0, data_max + 1e-9, tick_step))
 
 
-def label_ends(fig, t, ends, min_px=11):
+def label_ends(fig, t, ends, short=SHORT, min_px=11):
     fig.canvas.draw()
     for ax, points in ends.items():
         placed = []
         for x, y, condition in sorted(points, key=lambda p: p[1]):
             y_px = ax.transData.transform((x, y))[1]
             if all(abs(y_px - p) >= min_px for p in placed):
-                ax.annotate(SHORT[condition], (x, y), xytext=(4, 0), textcoords='offset points',
+                ax.annotate(short[condition], (x, y), xytext=(4, 0), textcoords='offset points',
                             va='center', fontsize=7.5, color=t['ink2'], annotation_clip=False)
                 placed.append(y_px)
 
 
-def finish(fig, t, present, ends, name, mode):
-    label_ends(fig, t, ends)
+def finish(fig, t, present, ends, name, mode, labels=CONDITIONS, short=SHORT, ncol=3):
+    label_ends(fig, t, ends, short)
     handles = [plt.Line2D([], [], color=t['series'][c], linewidth=2 * PX) for c in present]
-    fig.legend(handles, [CONDITIONS[c] for c in present], loc='upper left', bbox_to_anchor=(0.1, 0.84),
-               ncol=3, frameon=False, fontsize=7.5, labelcolor=t['ink2'], handlelength=1.6,
+    fig.legend(handles, [labels[c] for c in present], loc='upper left', bbox_to_anchor=(0.1, 0.84),
+               ncol=ncol, frameon=False, fontsize=7.5, labelcolor=t['ink2'], handlelength=1.6,
                columnspacing=1.6)
     fig.savefig(HERE / f'{name}_{mode}.png', dpi=DPI, facecolor=fig.get_facecolor())
     plt.close(fig)
@@ -147,6 +154,27 @@ def training_curve(mode, value, name, title, ylabel, percent=True, subtitle_extr
         if percent:
             ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f'{v:g}%'))
     finish(fig, t, sorted(present), ends, name, mode)
+
+
+def focus_curve(mode, value, name, title, ylabel):
+    """Experiment 8 vs its imitation-only control (experiment 9), one panel per seed."""
+    t = dict(THEMES[mode], series=FOCUS['series'][mode])
+    runs = [r for r in FOCUS['runs'] if (HERE / f'{r[2]}_action_stats.csv').exists()]
+    if not runs:
+        return
+    fig, axes = panels(t, title, f'Rolling mean over {WINDOW} training episodes (sampled actions). '
+                       'Every run: 137,680 environment steps.', 'Environment steps (thousands)', ylabel, top=0.72)
+    present, ends = set(), {}
+    for condition, seed, prefix in runs:
+        data = policy(HERE, prefix)
+        x = np.array([int(e['env_steps']) for e, _ in data])[WINDOW - 1:] / 1000
+        draw(axes[seed], t, x, rolling([value(e, s) for e, s in data]) * 100, condition, ends)
+        present.add(condition)
+    for ax in axes.values():
+        x_room(ax, 140, 20)
+        ax.set_ylim(bottom=0)
+        ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f'{v:g}%'))
+    finish(fig, t, sorted(present), ends, name, mode, FOCUS['labels'], FOCUS['short'], ncol=2)
 
 
 def actor_gradient(mode):
@@ -201,4 +229,8 @@ if __name__ == '__main__':
                        'Metres', percent=False, subtitle_extra=' Lower is better.')
         actor_gradient(mode)
         world_model(mode)
+        focus_curve(mode, lambda e, s: e['pickup'] == 'True', 'imitation_control_pickup_rate',
+                    'Pickups: imitation alone vs. imitation + reinforcement learning', 'Episodes with a pickup')
+        focus_curve(mode, lambda e, s: e['success'] == 'True', 'imitation_control_delivery_rate',
+                    'Deliveries: imitation alone vs. imitation + reinforcement learning', 'Episodes delivered')
     print('figures written to', HERE)
